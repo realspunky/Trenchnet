@@ -87,6 +87,14 @@ class Reader:
         tax=dict(zip([x[0] for x in TAX_FIELDS]+['vaultInfo'],
             self.helper.functions.getTaxTokenInfoV2(address).call(block_identifier=height)))
         result=normalize(address,state,tax)
+        # Optional display metadata must not block token monitoring.
+        try:
+            token_contract = self.w3.eth.contract(address=address, abi=[{
+                'name':'decimals','type':'function','stateMutability':'view',
+                'inputs':[], 'outputs':[{'name':'','type':'uint8'}]}])
+            result['token_decimals'] = token_contract.functions.decimals().call(block_identifier=height)
+        except Exception:
+            result['token_decimals'] = None
         result.update(block_number=height,block_hash=block['hash'].hex())
         return result
 

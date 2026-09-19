@@ -52,17 +52,26 @@ def persist_batch(c, tokens, height, block_hash):
                       tuple(t[k] for k in ['address','name','symbol','tx','created','height']))
         c.execute('INSERT OR REPLACE INTO scan_cursor VALUES (1,?,?)',(height,block_hash))
 
+def minimum_balance(s):
+    raw = str(s.get('minimum_share_balance', ''))
+    decimals = s.get('token_decimals')
+    if not raw.isdigit() or type(decimals) is not int or not 0 <= decimals <= 255:
+        return 'unavailable'
+    # Integer arithmetic preserves every digit, even for uint256 balances.
+    whole, fraction = divmod(int(raw), 10**decimals)
+    tail = str(fraction).zfill(decimals).rstrip('0') if decimals else ''
+    return f'{whole:,}' + ('.' + tail if tail else '') + ' units'
+
 def body(t,s,kind):
     allocation=s['dividend_allocation_bps']/100
-    return (f'PRIVATE PILOT — {kind}\n{t["name"]} ({t["symbol"]})\n'
-        f'Network: BNB Chain | Launchpad: Flap\nContract: {t["address"]}\n'
-        f'Token tax: buy {s["buy_tax_bps"]/100:g}% / sell {s["sell_tax_bps"]/100:g}%\n'
-        f'Holder allocation: {allocation:g}% of tax allocation\n'
-        f'Reward asset: {s.get("reward_token")} (zero address means native BNB)\n'
-        f'Minimum holder balance (raw units): {s.get("minimum_share_balance")}\n'
-        f'Bonding progress: {s["bonding_percent"]:.2f}% at block {s.get("block_number", "unknown")}\n'
-        f'Other allocations (basis points): {json.dumps(s["tax_allocations"])}\n'
-        f'https://bscscan.com/token/{t["address"]}\nhttps://bscscan.com/tx/{t["tx"]}\n'
+    return (f'📣 PRIVATE PILOT — {kind}\n🪙 {t["name"]} ({t["symbol"]})\n'
+        f'🌐 Network: BNB Chain | 🚀 Launchpad: Flap\n📋 Contract: {t["address"]}\n'
+        f'💸 Token tax: buy {s["buy_tax_bps"]/100:g}% / sell {s["sell_tax_bps"]/100:g}%\n'
+        f'📊 Holder allocation: {allocation:g}% of tax allocation\n'
+        f'💰 Reward asset: {s.get("reward_token")} (zero address means native BNB)\n'
+        f'🏦 Minimum holder balance: {minimum_balance(s)}\n'
+        f'📈 Bonding progress: {s["bonding_percent"]:.2f}% at block {s.get("block_number", "unknown")}\n'
+        f'🔗 https://bscscan.com/token/{t["address"]}\n'
         'Separate protocol fees may apply. This is a test candidate, not a verified all-in 3% fee match. '
         'A bonding alert does not confirm migration.')
 

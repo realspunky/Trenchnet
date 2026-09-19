@@ -19,7 +19,7 @@ To stop pilot alerts, set `SCANNER_ENABLED=false` and deploy. Leave the volume i
 - Saves launches and a block/hash checkpoint atomically in SQLite. Restarts resume the saved cursor. A changed checkpoint hash stops scanning for operator review; it does not silently skip data.
 - Reads Portal and TaxTokenHelper state at one finalized height. Requires matching 300-basis-point buy and sell token tax, positive dividend allocation, and tradable status. Migrated and nonmatching tokens do not receive new pilot alerts.
 - Queues a launch alert only for discoveries within ten minutes of creation; queues one pre-migration alert when observed bonding progress reaches the owner's threshold but remains below 100%. This is sampled monitoring: rapid crossings/migrations can be missed. A threshold alert is not migration confirmation.
-- Shows token name, symbol, address, chain, launchpad, token tax, allocation breakdown, reward asset, minimum holder balance in raw units, observed bonding progress/block and explorer links. Metadata is untrusted text, stripped of control characters; Telegram formatting and previews are disabled.
+- Shows token name, symbol, address, chain, launchpad, token tax, reward asset, minimum holder balance converted using the token’s decimals, observed bonding progress/block and explorer links. Metadata is untrusted text, stripped of control characters; Telegram formatting and previews are disabled.
 - Deduplicates events across restarts. Pending messages expire after five minutes. Explicit Telegram 429 responses get bounded retries; ambiguous timeouts/interrupted sends are marked uncertain and are not automatically resent. This avoids blind duplicate delivery but can lose an alert. There is no exactly-once guarantee or automatic manual-review interface yet.
 - Uses bounded work per cycle (100 blocks, five token inspections, one delivery). Large backlogs can delay alerts; inspect `/status` for lag and Alchemy for usage. Continuous monitoring may exceed provider free quotas. No automatic provider upgrade is configured.
 
@@ -62,3 +62,7 @@ The owner's Railway preflight screenshot showed chain_id 56, contracts_present t
 - https://docs.flap.sh/flap/developers/basic-and-mechanism/protocol-economics
 - https://core.telegram.org/bots/payments-stars
 - https://web3py.readthedocs.io/en/stable/middleware.html#proof-of-authority
+
+Alert display update: removed the Other allocations line. Minimum holder balance uses on-chain token decimals and comma-separated units; if decimals cannot be read it displays unavailable. Existing sent/queued messages are not rewritten. The screenshot token has 18 decimals: raw 10000000000000000000000 equals 10,000 units; raw 100000000000000000000000 equals 100,000 units.
+
+Alerts now include only the BscScan token link. The creation transaction remains stored internally but is not shown in the message.
