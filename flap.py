@@ -50,7 +50,7 @@ def normalize(address, state, tax):
                 and state['buyTaxRate'] == state['sellTaxRate'] == 300
                 and tax['dividendBps'] > 0)
     return dict(address=address.lower(), chain='bnb', launchpad='flap', verified=eligible,
-        total_tax_bps=300 if eligible else None, holder_rewards=tax['dividendBps'] > 0,
+        total_tax_bps=None, token_tax_bps=300 if eligible else None, holder_rewards=tax['dividendBps'] > 0,
         buy_tax_bps=state['buyTaxRate'], sell_tax_bps=state['sellTaxRate'],
         bonding_percent=float(Decimal(state['progress']) / Decimal(10**16)),
         migrated=state['status']==4, status=state['status'],
@@ -62,7 +62,9 @@ def normalize(address, state, tax):
 class Reader:
     def __init__(self, url):
         from web3 import Web3
+        from web3.middleware import ExtraDataToPOAMiddleware
         self.w3 = Web3(Web3.HTTPProvider(url, request_kwargs={'timeout':20}))
+        self.w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
         if self.w3.eth.chain_id != 56:
             raise ValueError('RPC is not BNB mainnet')
         for addr in [PORTAL,HELPER]:

@@ -1,4 +1,4 @@
-"""TrenchNet foundation. No live data adapters or payment acceptance yet."""
+"""TrenchNet command bot. Public alerts and payment acceptance are disabled."""
 import json
 import os
 import sqlite3
@@ -9,7 +9,7 @@ from access import setup, start_trial, state
 DB = os.environ.get('DATABASE_PATH', 'trenchnet.sqlite3')
 
 def database():
-    c = sqlite3.connect(DB)
+    c = sqlite3.connect(DB, timeout=30)
     c.execute('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, threshold INTEGER NOT NULL DEFAULT 80 CHECK(threshold BETWEEN 80 AND 95))')
     c.execute('CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value INTEGER)')
     c.commit()
@@ -40,8 +40,11 @@ def reply(c, user_id, text):
         return ('Welcome to TrenchNet. Currently in development; live alerts and payments are disabled.\n'
                 '/trial — start a 5-day trial (one alert per day)\n'
                 '/threshold 80 — set bonding threshold (80–95)\n'
+                '/myid — show your Telegram ID\n'
                 '/status — view settings\n/plans — planned pricing\n'
                 '/email — email availability\n/delete_me — remove saved settings')
+    if cmd == '/myid':
+        return f'Your Telegram user ID: {user_id}'
     if cmd == '/trial':
         if os.environ.get('TRIALS_ENABLED') != 'true':
             return 'Trials will open when live monitoring is ready. Your five days have not started.'
@@ -56,7 +59,24 @@ def reply(c, user_id, text):
     if cmd == '/status':
         threshold = c.execute('SELECT threshold FROM users WHERE id=?', (user_id,)).fetchone()[0]
         kind, expiry = state(c, user_id)
-        return f'Bonding threshold: {threshold}%\nAccess: {kind}\nExpiry (UTC Unix time): {expiry or 'none'}\nLive monitoring: not connected'
+        expiry_text = time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(expiry)) if expiry else 'none'
+        monitoring = 'Public alerts disabled'
+        if str(user_id) == os.environ.get('ADMIN_CHAT_ID'):
+            try:
+                health = c.execute('SELECT updated,status FROM scanner_health WHERE id=1').fetchone()
+            except sqlite3.OperationalError:
+                health = None
+            if health:
+                age = max(0, int(time.time()) - health[0])
+                monitoring += f'\n{health[1]}\nLast scanner update: {age}s ago'
+                if age > 180: monitoring += ' (stale; check Railway logs)'
+                counts = c.execute('SELECT state,COUNT(*) FROM pilot_outbox GROUP BY state').fetchall()
+                tokens = c.execute('SELECT status,COUNT(*) FROM scan_tokens GROUP BY status').fetchall()
+                monitoring += '\nTokens: ' + (', '.join(f'{k}={v}' for k,v in tokens) or 'none yet')
+                monitoring += '\nPilot deliveries: ' + (', '.join(f'{k}={v}' for k,v in counts) or 'none yet')
+            else:
+                monitoring += '\nPrivate scanner has not reported yet'
+        return f'Bonding threshold: {threshold}%\nAccess: {kind}\nExpiry: {expiry_text}\n{monitoring}'
     if cmd == '/plans':
         return ('Planned prices: $5 monthly / $60 for 12 months / $100 lifetime. '
                 'Free trial: five days, up to one qualifying alert per day; no automatic charge. Checkout is disabled. Telegram requires Stars for digital subscriptions sold inside bots. '

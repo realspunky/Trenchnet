@@ -1,69 +1,64 @@
-# TrenchNet — development foundation
+# TrenchNet — Flap BNB private pilot
 
-Bot: @TrenchNetBot. This is a runnable command/settings prototype, not a finished alert service. No money is accepted and no live token alerts are sent.
+@TrenchNetBot. This update adds an automatic Flap BNB scanner and private owner test alerts. Public alerts, payments and email are not ready. The code is tested with simulated events; the event ABI and tax helper still require validation against a real newly launched token on the owner's Alchemy endpoint. Deployment is performed by the owner; this ZIP does not update Railway automatically.
 
-## Run
-Python 3.11 or newer; standard library only. Set TELEGRAM_BOT_TOKEN using a hosting provider's secret environment settings, then run `python bot.py`. Never paste the token into chat, source code or screenshots. Run only one polling process. It needs outbound HTTPS to api.telegram.org and a persistent disk. DATABASE_PATH defaults to trenchnet.sqlite3. Existing webhook configurations must be removed before using polling.
+## Update the existing Railway deployment
 
-Tests: `python -m unittest -v` from this folder.
+1. Extract the ZIP and upload its contents to the existing GitHub repository root, replacing matching files. `bot.py`, `scanner.py`, `run.py` and `requirements.txt` must be at the root, not inside another folder. Commit the changes.
+2. Keep the existing persistent volume mounted at `/data` (lowercase). Keep `DATABASE_PATH=/data/trenchnet.sqlite3`, your existing `TELEGRAM_BOT_TOKEN` and `BNB_RPC_URL` secrets, and `PYTHONUNBUFFERED=1`. The Telegram token is the raw BotFather token; the Alchemy endpoint is its full HTTPS URL. Do not commit either secret.
+3. Set `TRIALS_ENABLED=false` and `SCANNER_ENABLED=false`. Set the Railway service start command to exactly `python run.py`. Allow the new deployment to finish.
+4. In a private chat with your bot, send `/myid`. Copy the number into a Railway variable named `ADMIN_CHAT_ID`. This must be your own positive private Telegram user ID, not a bot username or group ID.
+5. Set `SCANNER_ENABLED=true` and deploy the variable changes. Keep one replica, no HTTP healthcheck and service sleeping off: this is a background worker.
+6. Send `/threshold 85` (or any whole number 80–95), then `/status`. The owner's status includes checkpoint/lag, last scanner update, token states and private delivery counts. Initially no tokens/alerts is normal: the scanner starts at the current finalized block and waits for new launches.
 
-## Implemented
-Private-chat /start, /help, /threshold, /status, /plans, /email and /delete_me. SQLite saves thresholds and polling offsets. Token qualification and pre-migration threshold rules are tested. Raw token metadata must come from trusted, verified adapters, not user input.
+To stop pilot alerts, set `SCANNER_ENABLED=false` and deploy. Leave the volume in place. Do not enable public trials yet: the private pilot bypasses subscriber access and sends only to ADMIN_CHAT_ID.
 
-## Agreed requirements
-- Pons https://www.ponsfamily.com/launchpad, Stonk https://www.stonkfun.xyz/ and Flap.
-- Solana, BNB Chain, Robinhood Chain only where launchpads actually support them.
-- Exactly 3% total tax including launchpad fees; a holder reward allocation must exist.
-- Two event types: new launch and pre-migration bonding alert. User threshold 80–95%, default 80%; one pre-migration notification per token per subscriber.
-- Fields: token name, symbol, address, chain, launchpad, tax breakdown, holder reward details, bonding progress, token and transaction links.
-- Telegram delivery; optional verified email; phone and computer management.
-- Requested prices: $5 monthly, $60 for 12 months, $100 lifetime.
-- Requested settlement: USDT on BNB Smart Chain. Owner-supplied public address: 0x27107c28cd8573c36c42312df3917f24e3569ca3. Not verified or connected.
+## What the pilot does
 
-## Payment decision requiring correction
-Telegram requires Stars for digital goods/services sold inside Telegram bots, explicitly excluding cryptocurrency. The previously proposed in-bot USDT checkout must be revised. No substitute payment method or Stars conversion has been selected or implemented. Source: https://core.telegram.org/bots/payments-stars
+- Watches the documented Portal TokenCreated event on BNB mainnet, using finalized blocks and log batches of at most ten blocks.
+- Saves launches and a block/hash checkpoint atomically in SQLite. Restarts resume the saved cursor. A changed checkpoint hash stops scanning for operator review; it does not silently skip data.
+- Reads Portal and TaxTokenHelper state at one finalized height. Requires matching 300-basis-point buy and sell token tax, positive dividend allocation, and tradable status. Migrated and nonmatching tokens do not receive new pilot alerts.
+- Queues a launch alert only for discoveries within ten minutes of creation; queues one pre-migration alert when observed bonding progress reaches the owner's threshold but remains below 100%. This is sampled monitoring: rapid crossings/migrations can be missed. A threshold alert is not migration confirmation.
+- Shows token name, symbol, address, chain, launchpad, token tax, allocation breakdown, reward asset, minimum holder balance in raw units, observed bonding progress/block and explorer links. Metadata is untrusted text, stripped of control characters; Telegram formatting and previews are disabled.
+- Deduplicates events across restarts. Pending messages expire after five minutes. Explicit Telegram 429 responses get bounded retries; ambiguous timeouts/interrupted sends are marked uncertain and are not automatically resent. This avoids blind duplicate delivery but can lose an alert. There is no exactly-once guarantee or automatic manual-review interface yet.
+- Uses bounded work per cycle (100 blocks, five token inspections, one delivery). Large backlogs can delay alerts; inspect `/status` for lag and Alchemy for usage. Continuous monitoring may exceed provider free quotas. No automatic provider upgrade is configured.
 
-## Remaining work before launch
-1. Verify official launchpad contracts/APIs, supported chains, tax/reward semantics and bonding calculations. Pons lookup was region-blocked and Stonk lookup failed; no adapters have been verified.
-2. Build chain watchers, checkpoint/reconnect logic and historical catch-up; decide treatment of tokens discovered late or crossing a threshold between samples.
-3. Add subscription entitlements, expiry/renewal reminders and the agreed compliant payment design.
-4. Build durable per-user/per-token delivery queues, deduplication, retry limits and rate limiting. Handle blocked bots; current prototype retries transient errors and is not a production delivery worker.
-5. Add verified email opt-in, expiring verification codes, unsubscribe and email delivery provider.
-6. Add authenticated owner controls, support, terms, privacy details and database backups.
-7. Provision hosting and credentials securely; perform end-to-end tests before accepting subscriptions.
+## Fee interpretation still needs resolution
 
-The prototype stores only Telegram user ID and chosen threshold. It does not store message text or email. Duplicate command replies remain possible after an interruption; production delivery reliability is still pending.
+The agreed requirement is an all-in 3% fee with holder rewards included. Flap documents protocol fees separately from token tax. Therefore the pilot's 3% token-tax candidates are explicitly labeled **not verified all-in 3% matches**. `total_tax_bps` remains unknown, so the public qualification function rejects them. Dividend allocations describe how tax is allocated; they are not additional trading-tax percentages. We need a real-token fee breakdown before enabling public eligibility. Custom vault reward mechanisms without dividendBps are excluded for now.
 
-## Updated access implementation
-The superseding payment choice is Telegram Stars. USDT and the prior $70 annual plan are retired. Dollar targets are $5 / $60 / $100; Stars prices remain unset and checkout stays disabled.
+## Troubleshooting
 
-access.py implements one trial per Telegram user ID, exactly five consecutive 24-hour periods from activation, one logical alert per period, persistent event deduplication, paid expiration, calendar-month/year renewal (month-end clamped) and lifetime entitlement. Telegram and email must share the same logical alert reservation. Empty days expire normally. No automatic billing is implemented.
+- `unable to open database file`: verify the attached persistent volume mount and DATABASE_PATH exactly match `/data`. SQLite requires a writable parent directory.
+- `Scanner paused/retrying`: `/status` shows scanner error; verify BNB mainnet endpoint, provider quota, finalized-block support and log support. `python rpc_check.py` runs a separate capability check. Exception text containing secret URLs is deliberately not printed.
+- Token status `review`: five state-read attempts failed, potentially due to unsupported ABI/token version. Token addresses appear in logs; inspect a token using `python flap.py TOKEN_ADDRESS`. No candidate is emitted on failed reads.
+- Delivery state `uncertain` or `review`: inspect privately before any manual action. Don't delete outbox rows to force a resend.
+- Stale status: inspect Railway logs. `run.py` supervises the command bot and scanner; unexpected child exit stops the service so Railway can restart it. A stalled RPC times out.
+- Persistent checkpoint mismatch: stop the scanner and investigate RPC consistency; do not casually delete the database because it contains trial/payment history.
 
-The Start Free Trial keyboard button and /trial invoke activation. TRIALS_ENABLED defaults off to avoid consuming trials before real monitoring exists. Enable only when watchers and durable delivery are ready. /status exposes access status. /delete_me deletes preferences but retains trial-use/payment records; this retention needs to be covered in the production privacy policy.
+## Access and payment status
 
-grant_verified_payment is an internal entitlement primitive, not a payment verifier or checkout implementation. No user command can grant paid access. A future authenticated Stars handler must validate invoice ownership, amount, currency and successful payment before invoking it. Charge IDs are unique across users.
+The payment choice is Telegram Stars, superseding USDT. Dollar targets are $5 monthly, $60 for 12 months and $100 lifetime. Stars amounts, invoices and successful-payment verification are not implemented; checkout remains disabled.
 
-Remaining: actual Stars invoice handler and chosen prices, launchpad integrations, durable channel retry workers, proactive expiry prompts, verified email and deployment. Expired access is blocked by the access gate; /plans supplies the subscription prompt, but automatic expiry notifications are not yet wired.
+`access.py` implements trial/entitlement primitives: one trial per Telegram user, five consecutive 24-hour periods, up to one logical alert per period, expiration, event deduplication and unique payment charge IDs. Empty trial days expire normally. No automatic billing. The private scanner is not connected to subscriber delivery. `grant_verified_payment` is an internal primitive, not a payment verifier.
 
-## Flap BNB reader (development, not live-validated)
-Install requirements.txt and set BNB_RPC_URL as a secret, then run `python flap.py TOKEN_ADDRESS`. Reads only; no wallet key needed. RPC must support finalized blocks and historical calls at that block. The reader checks chain ID 56 and contract code, reads Portal state plus TaxTokenHelper at one finalized height, and fails closed on errors. No live RPC or real token was tested in this session; tests use synthetic fixtures.
+`/delete_me` removes preferences but retains trial/payment history; production privacy documentation and retention controls remain to be completed. Optional verified email, expiry reminders, backups, Pons/Stonk adapters and Solana/Robinhood support remain pending.
 
-This is a token inspector, not yet an automatic launch scanner or delivery worker. It uses the documented BNB Portal getTokenV8Safe and TaxTokenHelper getTaxTokenInfoV2 interfaces. Both buy and sell rates must equal 300 basis points, with matching helper rates and a positive dividend allocation. Asymmetric tokens are conservatively excluded. Bonding progress uses the reported 1e18 scale; unknown/staged statuses are excluded. Custom vault-based rewards without dividendBps are not yet classified. The reported token tax is not proven to include every separate platform/trading fee; verify fee semantics on real tokens before enabling the user's total-fee filter. Allocation fields are reported separately from tax rate; they must not be added to it.
+## Local checks
 
-Remaining integration gates: live ABI compatibility (especially Tax Token V3), fee semantics, TokenCreated log ABI and cursor/reorg handling, names/symbols/creation transaction enrichment, automatic watcher, durable delivery, and Robinhood/Pons/Stonk adapters. BNB support does not imply these other chains are connected.
+Python 3.11+. Install `python -m pip install -r requirements.txt` and run `python -m unittest -v` from this folder. Run `python run.py` after setting secrets in the environment. Only one polling bot instance is allowed. A previous Telegram webhook must be removed before polling.
 
-Official references checked:
-- https://docs.flap.sh/flap/developers/deployed-contract-addresses
+29 tests cover access rules, token parsing/filtering, checkpoint rollback, restart deduplication, threshold crossing, stale-message expiry, Telegram retry/uncertain delivery and RPC checks. These tests do not prove live event/ABI compatibility or end-to-end Telegram delivery.
+
+The owner's Railway preflight screenshot showed chain_id 56, contracts_present true and log_query_supported true. That verifies RPC capabilities, not a complete token monitoring pipeline. Next acceptance check: observe a real new Flap token, compare its decoded tax/reward/progress against official data, receive private alerts, restart and confirm the checkpoint/deduplication, then resolve the total-fee requirement.
+
+## Official references
+
+- https://docs.flap.sh/dev/launch-a-token
+- https://docs.flap.sh/flap/developers/wallet-and-terminal-and-bot-developers/index-token-created-events
 - https://docs.flap.sh/flap/developers/wallet-and-terminal-and-bot-developers/inspect-a-token
 - https://docs.flap.sh/flap/developers/wallet-and-terminal-and-bot-developers/inspect-a-tax-token
-- https://docs.flap.sh/flap/developers/wallet-and-terminal-and-bot-developers/index-token-created-events
-
-## BNB RPC configuration and live preflight
-The default read endpoint is https://bsc-dataseed.bnbchain.org, listed in BNB's official documentation. Override using the BNB_RPC_URL environment variable (use hosting secrets if the URL contains an API key). Never commit a private endpoint URL.
-
-Run `python rpc_check.py` before enabling the reader. It verifies chain ID 56, a fresh finalized block (within five minutes with up to 60 seconds clock skew), contract presence at that block and event-log query support. It hides endpoint details on failure. `flap.py` also refuses stale finalized data.
-
-Live read-only checks on 2026-09-19 returned chain ID 0x38, finalized block 0x751cbff (timestamp 2026-09-19T12:57:04Z), Portal bytecode 2882 bytes and Helper bytecode 2837 bytes. This confirms connectivity and contract presence only, not per-token ABI compatibility, fee correctness or automatic monitoring.
-
-BNB explicitly documents eth_getLogs as disabled on its listed public mainnet endpoints. This default is for initial state reads; an endpoint supporting event logs is still required for the launch scanner. A configured provider must pass the capability check before monitoring is enabled. No paid provider account has been created.
-Reference: https://docs.bnbchain.org/bnb-smart-chain/developers/json_rpc/json-rpc-endpoint/
+- https://docs.flap.sh/flap/developers/deployed-contract-addresses
+- https://docs.flap.sh/flap/developers/basic-and-mechanism/protocol-economics
+- https://core.telegram.org/bots/payments-stars
+- https://web3py.readthedocs.io/en/stable/middleware.html#proof-of-authority
