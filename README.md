@@ -17,7 +17,7 @@ To stop pilot alerts, set `SCANNER_ENABLED=false` and deploy. Leave the volume i
 
 - Watches the documented Portal TokenCreated event on BNB mainnet, using finalized blocks and log batches of at most ten blocks.
 - Saves launches and a block/hash checkpoint atomically in SQLite. Restarts resume the saved cursor. A changed checkpoint hash stops scanning for operator review; it does not silently skip data.
-- Reads Portal and TaxTokenHelper state at one finalized height. Requires matching 300-basis-point buy and sell token tax, positive dividend allocation, and tradable status. Migrated and nonmatching tokens do not receive new pilot alerts.
+- Reads Portal and TaxTokenHelper state at one finalized height. Requires equal buy and sell token tax of 100, 200 or 300 basis points, positive dividend allocation, and tradable status. Migrated and nonmatching tokens do not receive new pilot alerts.
 - Queues a launch alert only for discoveries within ten minutes of creation; queues one pre-migration alert when observed bonding progress reaches the owner's threshold but remains below 100%. This is sampled monitoring: rapid crossings/migrations can be missed. A threshold alert is not migration confirmation.
 - Shows token name, symbol, address, chain, launchpad, token tax, reward asset, minimum holder balance converted using the token’s decimals, observed bonding progress/block and explorer links. Metadata is untrusted text, stripped of control characters; Telegram formatting and previews are disabled.
 - Deduplicates events across restarts. Pending messages expire after five minutes. Explicit Telegram 429 responses get bounded retries; ambiguous timeouts/interrupted sends are marked uncertain and are not automatically resent. This avoids blind duplicate delivery but can lose an alert. There is no exactly-once guarantee or automatic manual-review interface yet.
@@ -25,7 +25,7 @@ To stop pilot alerts, set `SCANNER_ENABLED=false` and deploy. Leave the volume i
 
 ## Fee interpretation still needs resolution
 
-The agreed requirement is an all-in 3% fee with holder rewards included. Flap documents protocol fees separately from token tax. Therefore the pilot's 3% token-tax candidates are explicitly labeled **not verified all-in 3% matches**. `total_tax_bps` remains unknown, so the public qualification function rejects them. Dividend allocations describe how tax is allocated; they are not additional trading-tax percentages. We need a real-token fee breakdown before enabling public eligibility. Custom vault reward mechanisms without dividendBps are excluded for now.
+Accepted pilot token-tax rates are now 1%, 2% and 3%, with equal buy/sell rates and holder rewards required. The distinction between token tax and total fees remains unresolved. Flap documents protocol fees separately from token tax. Therefore the pilot's token-tax candidates are explicitly labeled **total trading fees not yet verified**. `total_tax_bps` remains unknown, so the public qualification function rejects them. Dividend allocations describe how tax is allocated; they are not additional trading-tax percentages. We need a real-token fee breakdown before enabling public eligibility. Custom vault reward mechanisms without dividendBps are excluded for now.
 
 ## Troubleshooting
 
@@ -48,7 +48,7 @@ The payment choice is Telegram Stars, superseding USDT. Dollar targets are $5 mo
 
 Python 3.11+. Install `python -m pip install -r requirements.txt` and run `python -m unittest -v` from this folder. Run `python run.py` after setting secrets in the environment. Only one polling bot instance is allowed. A previous Telegram webhook must be removed before polling.
 
-29 tests cover access rules, token parsing/filtering, checkpoint rollback, restart deduplication, threshold crossing, stale-message expiry, Telegram retry/uncertain delivery and RPC checks. These tests do not prove live event/ABI compatibility or end-to-end Telegram delivery.
+30 tests cover access rules, token parsing/filtering, checkpoint rollback, restart deduplication, threshold crossing, stale-message expiry, Telegram retry/uncertain delivery and RPC checks. These tests do not prove live event/ABI compatibility or end-to-end Telegram delivery.
 
 The owner's Railway preflight screenshot showed chain_id 56, contracts_present true and log_query_supported true. That verifies RPC capabilities, not a complete token monitoring pipeline. Next acceptance check: observe a real new Flap token, compare its decoded tax/reward/progress against official data, receive private alerts, restart and confirm the checkpoint/deduplication, then resolve the total-fee requirement.
 
@@ -66,3 +66,8 @@ The owner's Railway preflight screenshot showed chain_id 56, contracts_present t
 Alert display update: removed the Other allocations line. Minimum holder balance uses on-chain token decimals and comma-separated units; if decimals cannot be read it displays unavailable. Existing sent/queued messages are not rewritten. The screenshot token has 18 decimals: raw 10000000000000000000000 equals 10,000 units; raw 100000000000000000000000 equals 100,000 units.
 
 Alerts now include only the BscScan token link. The creation transaction remains stored internally but is not shown in the message.
+
+## Expansion update
+The 1%/2%/3% filter applies to newly discovered tokens and ongoing tracked-token inspections after deployment. Previously excluded tokens are not automatically replayed. Mixed buy/sell rates (such as buy 1%, sell 2%) remain excluded. Holder dividends must be positive. All earlier alert layout edits and the hidden /myid menu entry are retained.
+
+Network scope is BNB, Solana and Robinhood Chain (three total). Only Flap BNB is connected. Pons documentation currently redirects this research environment to a regional restriction; Stonk could not be retrieved. No guessed contract addresses or fake adapters have been added. To complete those adapters, obtain the launchpads' published factory/program IDs, creation/migration event schemas or IDLs, reward/tax state definitions and bonding formulas. Providing an accessible official document/export is sufficient; no wallet keys are needed. Solana RPC alone cannot establish a launchpad's tax and holder-reward semantics.

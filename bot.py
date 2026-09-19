@@ -20,7 +20,7 @@ def qualifies(token):
     return (token.get('verified') is True
             and token.get('launchpad') in {'pons', 'flap', 'stonk'}
             and token.get('chain') in {'solana', 'bnb', 'robinhood'}
-            and token.get('total_tax_bps') == 300
+            and token.get('total_tax_bps') in {100, 200, 300}
             and token.get('holder_rewards') is True)
 
 def advance_due(token, threshold):

@@ -47,10 +47,11 @@ def normalize(address, state, tax):
     consistent = all(type(tax.get(k)) is int and state[k] == tax[k]
                      for k in ['buyTaxRate','sellTaxRate'])
     eligible = (consistent and state['status'] in (1,4)
-                and state['buyTaxRate'] == state['sellTaxRate'] == 300
+                and state['buyTaxRate'] == state['sellTaxRate']
+                and state['buyTaxRate'] in {100, 200, 300}
                 and tax['dividendBps'] > 0)
     return dict(address=address.lower(), chain='bnb', launchpad='flap', verified=eligible,
-        total_tax_bps=None, token_tax_bps=300 if eligible else None, holder_rewards=tax['dividendBps'] > 0,
+        total_tax_bps=None, token_tax_bps=state['buyTaxRate'] if eligible else None, holder_rewards=tax['dividendBps'] > 0,
         buy_tax_bps=state['buyTaxRate'], sell_tax_bps=state['sellTaxRate'],
         bonding_percent=float(Decimal(state['progress']) / Decimal(10**16)),
         migrated=state['status']==4, status=state['status'],

@@ -72,7 +72,7 @@ def body(t,s,kind):
         f'🏦 Minimum holder balance: {minimum_balance(s)}\n'
         f'📈 Bonding progress: {s["bonding_percent"]:.2f}% at block {s.get("block_number", "unknown")}\n'
         f'🔗 https://bscscan.com/token/{t["address"]}\n'
-        'Separate protocol fees may apply. This is a test candidate, not a verified all-in 3% fee match. '
+        'Separate protocol fees may apply. This is a test candidate, total trading fees are not yet verified. '
         'A bonding alert does not confirm migration.')
 
 def queue_candidate(c,t,s,recipient,threshold,now):
