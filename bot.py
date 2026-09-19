@@ -40,7 +40,6 @@ def reply(c, user_id, text):
         return ('Welcome to TrenchNet. Currently in development; live alerts and payments are disabled.\n'
                 '/trial — start a 5-day trial (one alert per day)\n'
                 '/threshold 80 — set bonding threshold (80–95)\n'
-                '/myid — show your Telegram ID\n'
                 '/status — view settings\n/plans — planned pricing\n'
                 '/email — email availability\n/delete_me — remove saved settings')
     if cmd == '/myid':
