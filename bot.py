@@ -75,6 +75,19 @@ def reply(c, user_id, text):
                 monitoring += '\nPilot deliveries: ' + (', '.join(f'{k}={v}' for k,v in counts) or 'none yet')
             else:
                 monitoring += '\nPrivate scanner has not reported yet'
+            try:
+                stonk_health=c.execute('SELECT updated,status FROM stonk_health WHERE id=1').fetchone()
+            except sqlite3.OperationalError:
+                stonk_health=None
+            if stonk_health:
+                age=max(0,int(time.time())-stonk_health[0])
+                monitoring += f'\nStonk: {stonk_health[1]}\nStonk update: {age}s ago'
+                if age>300:monitoring += ' (stale; check logs)'
+                for label,table,column in [('Stonk tokens','stonk_tokens','status'),('Stonk deliveries','stonk_outbox','state')]:
+                    rows=c.execute(f'SELECT {column},COUNT(*) FROM {table} GROUP BY {column}').fetchall()
+                    monitoring += '\n'+label+': '+(', '.join(f'{k}={v}' for k,v in rows) or 'none yet')
+            elif os.environ.get('STONK_ENABLED')=='true':
+                monitoring += '\nStonk scanner has not reported yet'
         return f'Bonding threshold: {threshold}%\nAccess: {kind}\nExpiry: {expiry_text}\n{monitoring}'
     if cmd == '/plans':
         return ('Planned prices: $5 monthly / $60 for 12 months / $100 lifetime. '

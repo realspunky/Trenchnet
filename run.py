@@ -9,6 +9,8 @@ if __name__=='__main__':
     children=[subprocess.Popen([sys.executable,'-u','bot.py'])]
     if os.environ.get('SCANNER_ENABLED')=='true':
         children.append(subprocess.Popen([sys.executable,'-u','scanner.py']))
+    if os.environ.get('STONK_ENABLED')=='true':
+        children.append(subprocess.Popen([sys.executable,'-u','stonk.py']))
     def stop(signum, frame):
         raise SystemExit(0)
     signal.signal(signal.SIGTERM, stop)
