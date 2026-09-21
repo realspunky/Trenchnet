@@ -209,3 +209,9 @@ Use dedicated `SOLANA_RPC_URL` and `PONS_RPC_URL` endpoints for production relia
 - Pump.fun RPC calls retry temporary HTTP 408/425/429/5xx and common transient Solana RPC errors with backoff; cursor is not advanced on a failed scan.
 - Ember validates JSON responses, uses browser-compatible request headers, and tries canonical API variants before reporting a detailed source error.
 - Existing freshness and preference gates remain enabled; no database reset is required.
+
+## Targeted live-pipeline fix (2026-09-22)
+- Pump.fun `getTransaction` now opts into Solana transaction version 1 with `maxSupportedTransactionVersion: 1`, preventing RPC -32015 on v1 transactions.
+- EmberCurve response cap is configurable with `EMBER_MAX_RESPONSE_BYTES` (default 25,000,000) so the live market feed is not rejected at the former 5 MB limit.
+- PONS detects inherited cursor lag and skips historical replay beyond `PONS_MAX_CURSOR_LAG_BLOCKS` (default 200), while preserving a recent lookback for live launches. Existing historical filtered rows stay filtered.
+- STOnK registers genuinely fresh launch mints in unified intake before optional token-detail enrichment, so temporary token-detail read failures cannot suppress the launch itself.

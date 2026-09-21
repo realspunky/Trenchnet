@@ -155,7 +155,7 @@ class Scanner:
   queued=0; creations_seen=0
   if initialized:
    for item in reversed(fresh):
-    tx=self.call('getTransaction',[item['signature'],{'encoding':'jsonParsed','commitment':'confirmed','maxSupportedTransactionVersion':0}])
+    tx=self.call('getTransaction',[item['signature'],{'encoding':'jsonParsed','commitment':'confirmed','maxSupportedTransactionVersion':1}])
     if not tx:continue
     for t in creations(tx):
      creations_seen+=1

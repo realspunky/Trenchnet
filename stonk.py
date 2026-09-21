@@ -131,6 +131,13 @@ class Scanner:
         rows=fresh_rows+maintenance
         failures=0
         for mint,created,attempts in rows:
+            # A fresh launch must not disappear just because the token-detail endpoint is
+            # temporarily unhealthy. Register its mint immediately; richer metadata can
+            # update the same unified row when /tokens/<mint> recovers.
+            is_fresh = 0 <= now-created <= 600
+            if is_fresh:
+                record_launch(self.c,chain='solana',launchpad='stonk',address=mint,name='Unknown token',symbol='',
+                    launched_at=int(created),source_table='stonk_tokens',metadata={'mint':mint,'created':created,'metadata_pending':True})
             try:
                 data,generated=self.get('/tokens/'+mint)
                 s=normalize(data,mint)

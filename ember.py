@@ -33,8 +33,9 @@ def fetch(url=API):
         req=urllib.request.Request(candidate,headers={'Accept':'application/json, text/plain, */*','Accept-Encoding':'identity','Referer':'https://embercurve.fun/','User-Agent':'Mozilla/5.0 TrenchNet/1.2','Cache-Control':'no-cache'})
         try:
             with urllib.request.urlopen(req,timeout=20) as r:
-                raw=r.read(5_000_001); status=getattr(r,'status',200); ctype=(r.headers.get('Content-Type') or '').lower()
-            if len(raw)>5_000_000: raise ValueError('response too large')
+                max_bytes=max(5_000_000,int(os.environ.get('EMBER_MAX_RESPONSE_BYTES','25000000')))
+                raw=r.read(max_bytes+1); status=getattr(r,'status',200); ctype=(r.headers.get('Content-Type') or '').lower()
+            if len(raw)>max_bytes: raise ValueError(f'response too large > {max_bytes} bytes')
             lead=raw.lstrip()[:1]
             if lead not in (b'{',b'['):
                 errors.append(f'{status} non-JSON {ctype or "unknown"}'); continue

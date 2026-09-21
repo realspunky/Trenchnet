@@ -78,6 +78,14 @@ class Scanner:
             with self.c:self.c.execute('INSERT INTO pons_cursor VALUES(?,?,?)',(factory.lower(),tip,block['hash'].hex()))
             return 0
         height,old_hash=row
+        # If this deployment inherited a very old cursor, do not spend hours replaying
+        # historical PONS logs. Keep only a small recent lookback and then follow live blocks.
+        max_lag=max(50,int(os.environ.get('PONS_MAX_CURSOR_LAG_BLOCKS','200')))
+        if tip-height > max_lag:
+            height=max(0,tip-max_lag)
+            base=self.w3.eth.get_block(height)
+            old_hash=base['hash'].hex()
+            with self.c:self.c.execute('UPDATE pons_cursor SET height=?,hash=? WHERE factory=?',(height,old_hash,factory.lower()))
         check=self.w3.eth.get_block(height)
         if check['hash'].hex()!=old_hash:raise ValueError('PONS checkpoint mismatch')
         found=0
