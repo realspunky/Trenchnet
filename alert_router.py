@@ -36,14 +36,25 @@ def recipients(c):
 
 def process(c,now=None,limit=100):
     setup(c); now=int(time.time() if now is None else now)
+    max_age=int(os.environ.get('MAX_LAUNCH_AGE_SECONDS','600'))
+    with c:
+        c.execute("""UPDATE global_outbox SET state='stale' WHERE state='pending' AND event_key IN
+          (SELECT event_key FROM unified_launches WHERE launched_at>0 AND launched_at<?)""",(now-max_age,))
     rows=c.execute('''SELECT u.event_key,u.chain,u.launchpad,u.address,u.creator,u.name,u.symbol,u.pair_symbol,
-      u.source_height,u.bonding_progress,u.migrated,u.social_x_url,u.website_url,d.duplicate_count,d.unique_creators,d.creator_launches
+      u.source_height,u.bonding_progress,u.migrated,u.social_x_url,u.website_url,d.duplicate_count,d.unique_creators,d.creator_launches,u.launched_at
       FROM unified_launches u JOIN global_filter_decisions d ON d.event_key=u.event_key
       LEFT JOIN alert_route_state r ON r.event_key=u.event_key
       WHERE d.allow=1 AND r.event_key IS NULL ORDER BY u.first_seen,u.id LIMIT ?''',(int(limit),)).fetchall()
     queued=0
     for x in rows:
         row=x[:13]; decision={'duplicates':x[13],'unique_creators':x[14],'creator_launches':x[15]}
+        launched_at=int(x[16] or 0)
+        max_age=int(os.environ.get('MAX_LAUNCH_AGE_SECONDS','600'))
+        if launched_at and (launched_at < now-max_age or launched_at > now+120):
+            with c:
+                c.execute("UPDATE unified_launches SET pipeline_state='stale' WHERE event_key=?",(x[0],))
+                c.execute('INSERT OR IGNORE INTO alert_route_state VALUES(?,?)',(x[0],now))
+            continue
         event_key,_,pad,*_=row
         body=alert_body(row,decision)
         with c:

@@ -106,6 +106,26 @@ def reply(c, user_id, text):
                     monitoring += '\n'+label+': '+(', '.join(f'{k}={v}' for k,v in rows) or 'none yet')
             elif os.environ.get('PONS_ENABLED')=='true':
                 monitoring += '\nPONS scanner has not reported yet'
+            for label,enabled,health_table,token_table,outbox_table in [
+                ('EmberCurve','EMBER_ENABLED','ember_health','ember_tokens','ember_outbox'),
+                ('Pump.fun','PUMPFUN_ENABLED','pumpfun_health','pumpfun_tokens','pumpfun_outbox')]:
+                try:
+                    h=c.execute(f'SELECT updated,status FROM {health_table} WHERE id=1').fetchone()
+                except sqlite3.OperationalError:
+                    h=None
+                if h:
+                    age=max(0,int(time.time())-h[0])
+                    monitoring += f'\n{label}: {h[1]}\n{label} update: {age}s ago'
+                    if age>180: monitoring += ' (stale; check logs)'
+                    try:
+                        total=c.execute(f'SELECT COUNT(*) FROM {token_table}').fetchone()[0]
+                        monitoring += f'\n{label} tokens: {total}'
+                        states=c.execute(f'SELECT state,COUNT(*) FROM {outbox_table} GROUP BY state').fetchall()
+                        monitoring += f'\n{label} deliveries: '+(', '.join(f'{k}={v}' for k,v in states) or 'none yet')
+                    except sqlite3.OperationalError: pass
+                elif os.environ.get(enabled)=='true':
+                    monitoring += f'\n{label} scanner has not reported yet'
+
         return f'Bonding threshold: {threshold}%\nAccess: {kind}\nExpiry: {expiry_text}\n{monitoring}'
     if cmd == '/plans':
         return ('Planned prices: $5 monthly / $60 for 12 months / $100 lifetime. '

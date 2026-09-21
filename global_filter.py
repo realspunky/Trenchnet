@@ -72,13 +72,19 @@ def process(c, recipient, now=None, limit=100, duplicate_window=None, creator_wi
     creator_window=int(os.environ.get('CREATOR_WINDOW_SECONDS','1800') if creator_window is None else creator_window)
     creator_limit=int(os.environ.get('CREATOR_LAUNCH_LIMIT','3') if creator_limit is None else creator_limit)
     rows=c.execute('''SELECT event_key,chain,launchpad,address,creator,name,symbol,pair_symbol,source_height,
-      bonding_progress,migrated FROM unified_launches WHERE pipeline_state='intake'
+      bonding_progress,migrated,launched_at FROM unified_launches WHERE pipeline_state='intake'
       ORDER BY launched_at,id LIMIT ?''',(int(limit),)).fetchall()
     allowed=blocked=0
     for row in rows:
         event_key,chain,launchpad,address,creator,name,symbol,*_=row
-        decision=assess(c,chain=chain,launchpad=launchpad,address=address,creator=creator,name=name,symbol=symbol,
-            now=now,duplicate_window=duplicate_window,creator_window=creator_window,creator_limit=creator_limit)
+        launched_at=int(row[-1] or 0)
+        max_age=int(os.environ.get('MAX_LAUNCH_AGE_SECONDS','600'))
+        # Never replay historical listings as NEW LAUNCH alerts after a redeploy.
+        if launched_at and (launched_at < now-max_age or launched_at > now+120):
+            decision={'allow':False,'reason':'stale_launch','duplicates':1,'unique_creators':1,'creator_launches':1}
+        else:
+            decision=assess(c,chain=chain,launchpad=launchpad,address=address,creator=creator,name=name,symbol=symbol,
+                now=now,duplicate_window=duplicate_window,creator_window=creator_window,creator_limit=creator_limit)
         with c:
             c.execute('''INSERT OR REPLACE INTO global_filter_decisions
               (event_key,decided_at,allow,reason,duplicate_count,unique_creators,creator_launches)

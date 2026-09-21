@@ -194,3 +194,10 @@ Recommended Railway values:
 `PUMPFUN_POLL_SECONDS=5`
 `EMBER_POLL_SECONDS=15`
 Use dedicated `SOLANA_RPC_URL` and `PONS_RPC_URL` endpoints for production reliability.
+
+## Reliability hotfix: fresh launches only
+- `MAX_LAUNCH_AGE_SECONDS` defaults to `600`. Unified filtering and routing reject older launch records so Railway redeploys cannot replay old Flap/STOnK listings as new launches.
+- Existing pending unified alerts older than the freshness window are marked `stale` before delivery.
+- PONS `eth_getLogs` requests default to 10-block chunks (`PONS_LOG_BLOCK_CHUNK=10`) for provider compatibility.
+- EmberCurve now uses the public `/markets` developer surface and transparently falls back from the older `/api/solana/markets` setting.
+- `/status` now includes EmberCurve and Pump.fun scanner health in addition to Flap, STOnK and PONS.

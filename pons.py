@@ -83,7 +83,7 @@ class Scanner:
         found=0
         for _ in range(8):
             if height>=tip:break
-            end=min(height+250,tip)
+            end=min(height+int(os.environ.get('PONS_LOG_BLOCK_CHUNK','10')),tip)
             topic = V2_TOKEN_LAUNCHED_TOPIC if generation=='v2' else TOKEN_LAUNCHED_TOPIC
             logs=self.w3.eth.get_logs({'address':factory,'topics':[topic],
                                       'fromBlock':height+1,'toBlock':end})
@@ -139,8 +139,8 @@ def run():
             if os.environ.get('GLOBAL_FILTER_ENABLED','true')!='true':
                 for _ in range(10):deliver(c,token,api,table='pons_outbox');time.sleep(.5)
         except Exception as e:
-            scanner.health('PONS retrying: '+type(e).__name__)
-            print('PONS retrying: '+type(e).__name__,flush=True)
+            scanner.health('PONS retrying: '+type(e).__name__+'; reduce/check RPC log requests if persistent')
+            print('PONS retrying: '+type(e).__name__+'; RPC request failed',flush=True)
         time.sleep(15)
 
 if __name__=='__main__':run()

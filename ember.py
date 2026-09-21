@@ -3,7 +3,8 @@ import json, os, time, urllib.request
 from scanner import clean, deliver
 from launch_model import setup as unified_setup, record as record_launch
 
-API=os.environ.get('EMBER_MARKETS_URL','https://embercurve.fun/api/solana/markets')
+API=os.environ.get('EMBER_MARKETS_URL','https://embercurve.fun/markets')
+LEGACY_API='https://embercurve.fun/api/solana/markets'
 
 def setup(c):
     c.executescript('''
@@ -19,11 +20,21 @@ def setup(c):
     unified_setup(c)
 
 def fetch(url=API):
-    req=urllib.request.Request(url,headers={'Accept':'application/json','User-Agent':'TrenchNet-private-pilot/1.0'})
-    with urllib.request.urlopen(req,timeout=20) as r:
-        raw=r.read(5_000_001)
-        if len(raw)>5_000_000:raise ValueError('Ember response too large')
-        return json.loads(raw)
+    # Ember's public developer surface is /markets. Older TrenchNet builds used
+    # /api/solana/markets; transparently fall back so an old Railway variable
+    # cannot silently disable Ember alerts.
+    urls=[url]
+    if url==LEGACY_API: urls.append('https://embercurve.fun/markets')
+    last=None
+    for candidate in urls:
+        try:
+            req=urllib.request.Request(candidate,headers={'Accept':'application/json','User-Agent':'TrenchNet/1.0'})
+            with urllib.request.urlopen(req,timeout=20) as r:
+                raw=r.read(5_000_001)
+                if len(raw)>5_000_000:raise ValueError('Ember response too large')
+                return json.loads(raw)
+        except Exception as e:last=e
+    raise last
 
 def rows(payload):
     if isinstance(payload,list):return payload
