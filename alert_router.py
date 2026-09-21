@@ -10,9 +10,20 @@ def setup(c):
     CREATE TABLE IF NOT EXISTS alert_route_state(event_key TEXT PRIMARY KEY, routed_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS global_outbox(
       id INTEGER PRIMARY KEY, recipient INTEGER NOT NULL, event_key TEXT NOT NULL, body TEXT NOT NULL,
-      state TEXT NOT NULL DEFAULT 'queued', attempts INTEGER NOT NULL DEFAULT 0,
-      next_try INTEGER NOT NULL DEFAULT 0, expires INTEGER NOT NULL DEFAULT 0,
+      state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+      next_attempt INTEGER NOT NULL DEFAULT 0, expires INTEGER NOT NULL DEFAULT 0,
+      message_id INTEGER,
       UNIQUE(recipient,event_key));''')
+    # Migrate older global_outbox databases created before the router used the
+    # scanner delivery schema. Railway persistent volumes keep the old table,
+    # so CREATE TABLE IF NOT EXISTS alone is not enough.
+    cols={r[1] for r in c.execute('PRAGMA table_info(global_outbox)').fetchall()}
+    if 'next_attempt' not in cols:
+        c.execute('ALTER TABLE global_outbox ADD COLUMN next_attempt INTEGER NOT NULL DEFAULT 0')
+    if 'message_id' not in cols:
+        c.execute('ALTER TABLE global_outbox ADD COLUMN message_id INTEGER')
+    # Old router rows were named queued; deliver() consumes pending rows.
+    c.execute("UPDATE global_outbox SET state='pending' WHERE state='queued'")
     c.commit()
 
 def recipients(c):
@@ -39,10 +50,34 @@ def process(c,now=None,limit=100):
             for uid in recipients(c):
                 ensure_user(c,uid)
                 if get(c,uid).get(pad,False):
-                    c.execute('INSERT OR IGNORE INTO global_outbox(recipient,event_key,body,expires) VALUES(?,?,?,?)',(uid,event_key,body,now+600))
+                    c.execute("INSERT OR IGNORE INTO global_outbox(recipient,event_key,body,state,next_attempt,expires) VALUES(?,?,?,'pending',0,?)",(uid,event_key,body,now+600))
                     queued+=1
             c.execute('INSERT OR IGNORE INTO alert_route_state VALUES(?,?)',(event_key,now))
     return {'processed':len(rows),'queued':queued}
+
+def enforce_preferences(c):
+    """Cancel any still-pending global alert that no longer matches the user's current /alerts selection.
+
+    This is a second gate at delivery time. It protects all five launchpads, including
+    alerts that were queued before the user changed preferences.
+    """
+    setup(c)
+    rows=c.execute("""SELECT o.id,o.recipient,u.launchpad
+      FROM global_outbox o JOIN unified_launches u ON u.event_key=o.event_key
+      WHERE o.state='pending'""").fetchall()
+    cancelled=0
+    for ident,uid,pad in rows:
+        ensure_user(c,uid)
+        if not get(c,uid).get(pad,False):
+            with c:c.execute("UPDATE global_outbox SET state='preference_blocked' WHERE id=? AND state='pending'",(ident,))
+            cancelled+=1
+    return cancelled
+
+def deliver_selected(c,token,send):
+    # Re-check preferences immediately before each Telegram send. This makes the
+    # preference system authoritative for Flap, STOnK, PONS, EmberCurve and Pump.fun.
+    enforce_preferences(c)
+    return deliver(c,token,send,table='global_outbox')
 
 def run():
     from bot import database,api
@@ -51,7 +86,7 @@ def run():
     while True:
         try:
             process(c)
-            for _ in range(20): deliver(c,token,api,table='global_outbox'); time.sleep(.25)
+            for _ in range(20): deliver_selected(c,token,api); time.sleep(.25)
         except Exception as e: print('Alert router error: '+type(e).__name__+': '+str(e),flush=True)
         time.sleep(float(os.environ.get('ALERT_ROUTER_POLL_SECONDS','3')))
 if __name__=='__main__':run()

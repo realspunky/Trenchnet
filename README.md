@@ -163,3 +163,10 @@ The unified launch model now normalizes optional token-supplied social links int
 
 ## Alert preference routing fix
 When `GLOBAL_FILTER_ENABLED=true`, launchpad scanners no longer deliver their legacy per-launchpad outboxes directly. All launch alerts are delivered only by `alert_router.py`, which applies each user's `/alerts` launchpad preferences. This prevents disabled launchpads (for example Flap) from bypassing a Pump.fun-only selection.
+
+### Alert delivery schema migration fix
+The unified alert router now migrates older persistent `global_outbox` tables to the delivery schema used by `scanner.deliver()`. Existing `queued` rows are converted to `pending`, and missing `next_attempt` / `message_id` columns are added automatically. This fixes the case where `/alerts` selections saved correctly but approved alerts were never delivered after routing.
+
+
+### Alert preference enforcement fix
+The `/alerts` preference is now checked twice for all five launchpads: once when a globally-approved launch is routed, and again immediately before Telegram delivery. Pending alerts queued before a user changes selection are marked `preference_blocked` and cannot leak through. This applies equally to Flap, STOnK, PONS, EmberCurve and Pump.fun.
