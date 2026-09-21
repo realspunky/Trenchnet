@@ -28,11 +28,11 @@ def fetch(url=API):
 def rows(payload):
     if isinstance(payload,list):return payload
     if not isinstance(payload,dict):raise ValueError('Invalid Ember response')
-    for k in ('markets','data','items','results'):
+    for k in ('markets','data','items','results','coins'):
         v=payload.get(k)
         if isinstance(v,list):return v
         if isinstance(v,dict):
-            for kk in ('markets','items','results'):
+            for kk in ('markets','items','results','coins'):
                 if isinstance(v.get(kk),list):return v[kk]
     raise ValueError('Ember markets list not found')
 
@@ -44,14 +44,15 @@ def pick(d,*keys,default=None):
 def normalize(x):
     if not isinstance(x,dict):raise ValueError('Invalid Ember market')
     token=x.get('token') if isinstance(x.get('token'),dict) else {}
-    mint=str(pick(x,'mint','tokenMint','baseMint','address',default=pick(token,'mint','address',default='')))
+    base=x.get('baseToken') if isinstance(x.get('baseToken'),dict) else {}
+    mint=str(pick(x,'mint','mintAddress','tokenMint','baseMint','address',default=pick(token,'mint','mintAddress','address',default=pick(base,'mint','address',default=''))))
     if not 32<=len(mint)<=50:raise ValueError('Invalid Ember mint')
-    name=clean(pick(x,'name',default=pick(token,'name',default='Unknown')))
-    symbol=clean(pick(x,'symbol','ticker',default=pick(token,'symbol','ticker',default='')),30)
-    creator=str(pick(x,'creator','creatorWallet','deployer',default=''))
+    name=clean(pick(x,'name','tokenName',default=pick(token,'name',default=pick(base,'name',default='Unknown'))))
+    symbol=clean(pick(x,'symbol','ticker','tokenSymbol',default=pick(token,'symbol','ticker',default=pick(base,'symbol',default=''))),30)
+    creator=str(pick(x,'creator','creatorWallet','creatorAddress','deployer','authority',default=''))
     pair=x.get('pair') if isinstance(x.get('pair'),dict) else {}
     pair_symbol=clean(pick(x,'pairSymbol','quoteSymbol',default=pick(pair,'symbol',default='')),30)
-    progress=pick(x,'bondingProgress','bonding_progress','progress','curveProgress')
+    progress=pick(x,'bondingProgress','bonding_progress','progress','curveProgress','curve_progress','bondingCurveProgress')
     try: progress=float(progress) if progress is not None else None
     except (TypeError,ValueError): progress=None
     if progress is not None and 0<=progress<=1:progress*=100
@@ -72,7 +73,10 @@ class Scanner:
     def health(self,msg):
         with self.c:self.c.execute('INSERT OR REPLACE INTO ember_health VALUES(1,?,?)',(int(time.time()),msg))
     def scan(self):
-        now=int(time.time()); payload=self.get(); markets=[normalize(x) for x in rows(payload)]
+        now=int(time.time()); payload=self.get(); raw_rows=rows(payload); markets=[]; bad=0
+        for x in raw_rows:
+            try: markets.append(normalize(x))
+            except Exception: bad+=1
         initialized=self.c.execute("SELECT value FROM ember_state WHERE key='initialized'").fetchone()
         new=0
         with self.c:
@@ -94,7 +98,7 @@ class Scanner:
                     self.c.execute('INSERT OR IGNORE INTO ember_outbox(recipient,event_key,body,expires) VALUES(?,?,?,?)',
                       (self.recipient,'solana:'+t['mint']+':ember:launch',body(t),now+600));new+=1
             self.c.execute("INSERT OR REPLACE INTO ember_state VALUES('initialized','1')")
-        self.health(f'EmberCurve: {len(markets)} markets indexed; {new} new launches queued; filtration not yet applied')
+        self.health(f'EmberCurve: {len(raw_rows)} API rows; {len(markets)} valid; {bad} malformed; {new} new launches detected')
 
 def run():
     if os.environ.get('EMBER_ENABLED')!='true':return

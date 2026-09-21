@@ -108,36 +108,55 @@ class Scanner:
  def health(self,msg):
   with self.c:self.c.execute('INSERT OR REPLACE INTO pumpfun_health VALUES(1,?,?)',(int(time.time()),msg))
  def scan(self):
-  now=int(time.time());limit=int(os.environ.get('PUMPFUN_SIGNATURE_LIMIT','100'))
-  sigs=self.call('getSignaturesForAddress',[PROGRAM,{'limit':limit,'commitment':'confirmed'}]) or []
+  now=int(time.time())
+  page_size=max(100,min(1000,int(os.environ.get('PUMPFUN_SIGNATURE_LIMIT','1000'))))
+  max_pages=max(1,min(25,int(os.environ.get('PUMPFUN_MAX_PAGES','10'))))
   initialized=self.c.execute("SELECT value FROM pumpfun_state WHERE key='initialized'").fetchone()
   known=self.c.execute("SELECT value FROM pumpfun_state WHERE key='last_signature'").fetchone()
-  last=known[0] if known else None;fresh=[]
-  for s in sigs:
-   if s['signature']==last:break
-   if s.get('err') is None:fresh.append(s)
-  queued=0
-  # First run snapshots the current head; later runs process oldest -> newest.
+  last=known[0] if known else None
+
+  # Walk backwards until the previous head is found. This avoids losing create_v2
+  # transactions when more than one page of Pump program traffic lands between polls.
+  fresh=[]; before=None; reached_last=False; newest=None; pages=0
+  while pages < max_pages:
+   opts={'limit':page_size,'commitment':'confirmed'}
+   if before: opts['before']=before
+   sigs=self.call('getSignaturesForAddress',[PROGRAM,opts]) or []
+   pages+=1
+   if not sigs: break
+   if newest is None: newest=sigs[0]['signature']
+   for item in sigs:
+    if item['signature']==last:
+     reached_last=True; break
+    if item.get('err') is None:fresh.append(item)
+   if reached_last or len(sigs)<page_size: break
+   before=sigs[-1]['signature']
+
+  queued=0; creations_seen=0
   if initialized:
-   for s in reversed(fresh):
-    tx=self.call('getTransaction',[s['signature'],{'encoding':'jsonParsed','commitment':'confirmed','maxSupportedTransactionVersion':0}])
+   for item in reversed(fresh):
+    tx=self.call('getTransaction',[item['signature'],{'encoding':'jsonParsed','commitment':'confirmed','maxSupportedTransactionVersion':0}])
     if not tx:continue
     for t in creations(tx):
+     creations_seen+=1
      meta=self.metadata_get(t.get('uri')) if t.get('uri') else {}
-     if meta: t=dict(t,metadata=meta,**{k:meta.get(k) for k in ('twitter','website') if meta.get(k)})
+     if meta:t=dict(t,metadata=meta,**{k:meta.get(k) for k in ('twitter','website') if meta.get(k)})
      old=self.c.execute('SELECT 1 FROM pumpfun_tokens WHERE mint=?',(t['mint'],)).fetchone()
-     record_launch(self.c,chain='solana',launchpad='pumpfun',address=t['mint'],creator=t['creator'],
-      name=t['name'],symbol=t['symbol'],source_tx=s['signature'],source_height=s.get('slot',0),launched_at=now,
-      source_table='pumpfun_tokens',metadata=t,now=now)
+     record_launch(self.c,chain='solana',launchpad='pumpfun',address=t['mint'],creator=t['creator'],name=t['name'],symbol=t['symbol'],source_tx=item['signature'],source_height=item.get('slot',0),launched_at=now,source_table='pumpfun_tokens',metadata=t,now=now)
      with self.c:
-      self.c.execute('INSERT OR IGNORE INTO pumpfun_tokens VALUES(?,?,?,?,?,?,?,?,?)',(t['mint'],t['name'],t['symbol'],t['creator'],t['uri'],s['signature'],s.get('slot',0),now,json.dumps(t)))
+      self.c.execute('INSERT OR IGNORE INTO pumpfun_tokens VALUES(?,?,?,?,?,?,?,?,?)',(t['mint'],t['name'],t['symbol'],t['creator'],t['uri'],item['signature'],item.get('slot',0),now,json.dumps(t)))
       if old is None:
        self.c.execute('INSERT OR IGNORE INTO pumpfun_outbox(recipient,event_key,body,expires) VALUES(?,?,?,?)',(self.recipient,'solana:'+t['mint']+':pumpfun:launch',body(t),now+600));queued+=1
-  if sigs:
+
+  if newest:
+   # Advance only when we either found the old cursor or the scan did not exhaust its cap.
+   # If capped, retain the cursor and retry with a larger window instead of silently skipping.
+   safe_to_advance=(last is None or reached_last or pages < max_pages or len(fresh)<page_size)
    with self.c:
-    self.c.execute("INSERT OR REPLACE INTO pumpfun_state VALUES('last_signature',?)",(sigs[0]['signature'],))
+    if safe_to_advance:self.c.execute("INSERT OR REPLACE INTO pumpfun_state VALUES('last_signature',?)",(newest,))
     self.c.execute("INSERT OR REPLACE INTO pumpfun_state VALUES('initialized','1')")
-  self.health(f'Pump.fun: {len(fresh)} new program txs scanned; {queued} launches queued; filtration not yet applied')
+  capped=bool(last and not reached_last and pages>=max_pages)
+  self.health(f'Pump.fun: pages {pages}; {len(fresh)} fresh program txs; {creations_seen} create_v2; {queued} launches; capped={capped}')
 
 def run():
  if os.environ.get('PUMPFUN_ENABLED')!='true':return

@@ -13,6 +13,9 @@ ACTIVE_FACTORY=Web3.to_checksum_address('0xA5aAb3F0c6EeadF30Ef1D3Eb997108E976351
 ACTIVE_START=8991118
 LEGACY_FACTORY=Web3.to_checksum_address('0x0c37a24F5D23A486FA692d1500881d698B1F77a4')
 LEGACY_START=8600612
+V2_FACTORY=Web3.to_checksum_address('0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e')
+V2_START=int(os.environ.get('PONS_V2_START_BLOCK','0'))
+V2_TOKEN_LAUNCHED_TOPIC='0x8d4aad4953d0ca700d468f3753aa14432d1b35b43ec6409f051fb6aa43a89607'
 TOKEN_LAUNCHED_TOPIC='0xdb51ea9ad51ab453a65a4cb7e60c3cb378c9501bb002609f8f97778fb6c4235a'
 EVENT_ABI={"anonymous":False,"inputs":[
  {"indexed":True,"name":"token","type":"address"},{"indexed":True,"name":"deployer","type":"address"},
@@ -64,12 +67,13 @@ def alert_body(t,decision):
 class Scanner:
     def __init__(self,c,url,recipient):
         self.c=c;self.url=url;self.recipient=recipient;self.w3=Web3(Web3.HTTPProvider(url,request_kwargs={'timeout':20}))
-        self.factories=[(ACTIVE_FACTORY,ACTIVE_START),(LEGACY_FACTORY,LEGACY_START)]
+        self.factories=[(V2_FACTORY,V2_START,'v2'),(ACTIVE_FACTORY,ACTIVE_START,'v1'),(LEGACY_FACTORY,LEGACY_START,'v1')]
     def health(self,msg):
         with self.c:self.c.execute('INSERT OR REPLACE INTO pons_health VALUES(1,?,?)',(int(time.time()),msg))
-    def scan_factory(self,factory,start,tip):
+    def scan_factory(self,factory,start,tip,generation='v1'):
         row=self.c.execute('SELECT height,hash FROM pons_cursor WHERE factory=?',(factory.lower(),)).fetchone()
         if row is None:
+            # Snapshot current head on first boot. This prevents a history flood but captures every future launch.
             block=self.w3.eth.get_block(tip)
             with self.c:self.c.execute('INSERT INTO pons_cursor VALUES(?,?,?)',(factory.lower(),tip,block['hash'].hex()))
             return 0
@@ -80,12 +84,20 @@ class Scanner:
         for _ in range(8):
             if height>=tip:break
             end=min(height+250,tip)
-            logs=self.w3.eth.get_logs({'address':factory,'topics':[TOKEN_LAUNCHED_TOPIC],
+            topic = V2_TOKEN_LAUNCHED_TOPIC if generation=='v2' else TOKEN_LAUNCHED_TOPIC
+            logs=self.w3.eth.get_logs({'address':factory,'topics':[topic],
                                       'fromBlock':height+1,'toBlock':end})
-            contract=self.w3.eth.contract(address=factory,abi=[EVENT_ABI])
+            contract=self.w3.eth.contract(address=factory,abi=[EVENT_ABI]) if generation=='v1' else None
             for log in logs:
-                ev=contract.events.TokenLaunched().process_log(log)['args']
-                address=ev['token'].lower();creator=ev['deployer'].lower();pool=ev['pool'].lower()
+                if generation=='v2':
+                    # V2: token, curve and deployer are indexed topics 1..3.
+                    if len(log.get('topics',[])) < 4: continue
+                    address=('0x'+log['topics'][1].hex()[-40:]).lower()
+                    pool=('0x'+log['topics'][2].hex()[-40:]).lower()  # bonding curve address
+                    creator=('0x'+log['topics'][3].hex()[-40:]).lower()
+                else:
+                    ev=contract.events.TokenLaunched().process_log(log)['args']
+                    address=ev['token'].lower();creator=ev['deployer'].lower();pool=ev['pool'].lower()
                 name,symbol=metadata(self.w3,address)
                 block=self.w3.eth.get_block(log['blockNumber'])
                 t=dict(address=address,creator=creator,pool=pool,name=name,symbol=symbol,
@@ -108,7 +120,7 @@ class Scanner:
     def scan(self):
         if self.w3.eth.chain_id!=CHAIN_ID:raise ValueError('Wrong network; expected Robinhood Chain')
         tip=self.w3.eth.block_number;found=0
-        for factory,start in self.factories:found+=self.scan_factory(factory,start,tip)
+        for factory,start,generation in self.factories:found+=self.scan_factory(factory,start,tip,generation)
         total=self.c.execute("SELECT COUNT(*) FROM unified_launches WHERE launchpad='pons'").fetchone()[0]
         pending=self.c.execute("SELECT COUNT(*) FROM unified_launches WHERE launchpad='pons' AND pipeline_state='intake'").fetchone()[0]
         approved=self.c.execute("SELECT COUNT(*) FROM unified_launches WHERE launchpad='pons' AND pipeline_state='approved'").fetchone()[0]

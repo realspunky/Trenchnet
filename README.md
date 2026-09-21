@@ -179,3 +179,18 @@ The `/alerts` preference is now checked twice for all five launchpads: once when
 - PONS health now reports new logs plus unified intake/approved counts.
 - EmberCurve first poll is a baseline only; it no longer turns every pre-existing market into a fresh unified launch. New markets after initialization enter the pipeline normally.
 - Pump.fun keeps its first-run head snapshot behavior and metadata social-link extraction.
+
+## 2026-09-21 scanner reliability repair
+
+- PONS now watches the current V2 factory `0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e` and V2 `TokenLaunched` topic, while retaining V1 readers.
+- Pump.fun signature ingestion is paginated (up to 1000 signatures/page, configurable pages) so high program traffic does not silently push launches outside a 100-signature window.
+- Pump.fun exposes `PUMPFUN_MAX_PAGES` (default 10) and accepts `PUMPFUN_SIGNATURE_LIMIT` up to 1000.
+- Ember market parsing accepts additional public API response shapes/field names and isolates malformed rows instead of aborting the whole polling cycle.
+- Health rows now expose scanner-specific counts useful for Railway diagnostics.
+
+Recommended Railway values:
+`PUMPFUN_SIGNATURE_LIMIT=1000`
+`PUMPFUN_MAX_PAGES=10`
+`PUMPFUN_POLL_SECONDS=5`
+`EMBER_POLL_SECONDS=15`
+Use dedicated `SOLANA_RPC_URL` and `PONS_RPC_URL` endpoints for production reliability.
