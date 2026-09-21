@@ -7,6 +7,7 @@ import time
 import unicodedata
 from flap import Reader, PORTAL
 from rpc_check import call
+from launch_model import setup as unified_setup, record as record_launch
 
 SIGNATURE = 'TokenCreated(uint256,address,uint256,address,string,string,string)'
 TYPES = ['uint256','address','uint256','address','string','string','string']
@@ -29,6 +30,7 @@ def setup(c):
     # A send interrupted by a restart might have reached Telegram. Do not blindly resend.
     c.execute("UPDATE pilot_outbox SET state='uncertain' WHERE state='sending'")
     c.commit()
+    unified_setup(c)
 
 def clean(value, limit=100):
     return ''.join(ch for ch in str(value) if not unicodedata.category(ch).startswith('C'))[:limit]
@@ -43,7 +45,7 @@ def decode_launch(log):
     if len(topics)!=1 or topics[0].lower()!=topic.lower():
         raise ValueError('Unexpected event signature/indexing')
     ts,creator,nonce,address,name,symbol,meta=decode(TYPES,bytes.fromhex(log['data'][2:]))
-    return dict(address=address.lower(),name=clean(name),symbol=clean(symbol,30),
+    return dict(address=address.lower(),creator=str(creator).lower(),name=clean(name),symbol=clean(symbol,30),
                 tx=log['transactionHash'],created=ts,height=int(log['blockNumber'],16))
 
 def persist_batch(c, tokens, height, block_hash):
@@ -51,6 +53,9 @@ def persist_batch(c, tokens, height, block_hash):
         for t in tokens:
             c.execute('INSERT OR IGNORE INTO scan_tokens(address,name,symbol,tx,created,height) VALUES (?,?,?,?,?,?)',
                       tuple(t[k] for k in ['address','name','symbol','tx','created','height']))
+            record_launch(c,chain='bnb',launchpad='flap',address=t['address'],creator=t.get('creator',''),
+                name=t['name'],symbol=t['symbol'],source_tx=t['tx'],source_height=t['height'],
+                launched_at=t['created'],source_table='scan_tokens',metadata=t)
         c.execute('INSERT OR REPLACE INTO scan_cursor VALUES (1,?,?)',(height,block_hash))
 
 def minimum_balance(s):
@@ -155,13 +160,16 @@ def alert_payload(recipient, text):
         # Telegram entity offsets count UTF-16 units, including preceding emojis.
         offset = len(text[:match.start(1)].encode('utf-16-le')) // 2
         payload['entities'] = [{'type': 'code', 'offset': offset, 'length': len(address)}]
-        payload['reply_markup'] = {'inline_keyboard': [[{
-            'text': '📋 Copy contract', 'copy_text': {'text': address}
-        }]]}
+        buttons=[{'text': '📋 Copy contract', 'copy_text': {'text': address}}]
+        xm=re.search(r'^𝕏 X: (https?://\S+)$', text, re.MULTILINE)
+        wm=re.search(r'^🌐 Website: (https?://\S+)$', text, re.MULTILINE)
+        if xm: buttons.append({'text':'𝕏 X','url':xm.group(1)})
+        if wm: buttons.append({'text':'🌐 Website','url':wm.group(1)})
+        payload['reply_markup'] = {'inline_keyboard': [buttons]}
     return payload
 
 def deliver(c,token,send,table="pilot_outbox"):
-    if table not in {"pilot_outbox", "stonk_outbox"}:raise ValueError("Invalid delivery table")
+    if table not in {"pilot_outbox", "stonk_outbox", "pons_outbox", "ember_outbox", "pumpfun_outbox", "global_outbox"}:raise ValueError("Invalid delivery table")
     from urllib.error import HTTPError
     with c:
         c.execute(f"UPDATE {table} SET state='expired' WHERE state='pending' AND expires<=?",(int(time.time()),))

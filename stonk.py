@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlencode
 from urllib.error import HTTPError
 from scanner import clean, deliver
+from launch_model import setup as unified_setup, record as record_launch
 
 BASE = 'https://www.stonkfun.xyz/api/public/v1'
 MINT = re.compile(r'[1-9A-HJ-NP-Za-km-z]{32,44}\Z')
@@ -54,6 +55,7 @@ def setup(c):
         message_id INTEGER,expires INTEGER NOT NULL DEFAULT 0,UNIQUE(recipient,event_key));
     ''')
     with c:c.execute("UPDATE stonk_outbox SET state='uncertain' WHERE state='sending'")
+    unified_setup(c)
 
 def normalize(data, expected):
     if data.get('network')!='mainnet-beta':raise FeedError('Wrong network')
@@ -128,6 +130,9 @@ class Scanner:
             try:
                 data,generated=self.get('/tokens/'+mint)
                 s=normalize(data,mint)
+                record_launch(self.c,chain='solana',launchpad='stonk',address=mint,name=s['name'],symbol=s['symbol'],
+                    launched_at=int(created),bonding_progress=s['progress'],migrated=s['status']=='graduated',
+                    source_table='stonk_tokens',metadata=s)
                 status='migrated' if s['status']=='graduated' else ('tracking' if s['eligible'] else 'excluded')
                 items=[]
                 if status=='tracking':
@@ -135,7 +140,7 @@ class Scanner:
                     if self.bonding_enabled and threshold<=s['progress']<100:items.append(('bonding','Pre-migration threshold reached'))
                 with self.c:
                     for kind,title in items:
-                        self.c.execute('INSERT OR IGNORE INTO stonk_outbox(recipient,event_key,body,expires) VALUES(?,?,?,?)',
+                                        self.c.execute('INSERT OR IGNORE INTO stonk_outbox(recipient,event_key,body,expires) VALUES(?,?,?,?)',
                             (self.recipient,'solana:'+mint+':'+kind,body(s,title,generated),int(time.time())+300))
                     self.c.execute('UPDATE stonk_tokens SET status=?,snapshot=?,next_check=?,attempts=0 WHERE mint=?',
                         (status,json.dumps(s),time.time()+60,mint))

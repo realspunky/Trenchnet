@@ -90,3 +90,73 @@ Restart checkpoints, tokens, health and outbox are stored in separate stonk_* ta
 Tests: 39 automated checks across BNB, access and Stonk, including rate/tax gates, stale API rejection, pagination limits, restart deduplication, chain/token identity, production launch-only behavior and isolated delivery. Pons/Robinhood remains pending.
 
 Copy-contract update: all new BNB and Stonk alert deliveries format the contract as code and add a native Telegram Copy contract button. The button copies only the address. Existing sent messages are unchanged. No extra callback handler is needed.
+
+## PONS / Robinhood Chain private pilot
+
+Set `PONS_ENABLED=true` to start the read-only PONS listener. Optional settings:
+
+- `PONS_RPC_URL` — defaults to Robinhood Chain public mainnet RPC.
+- `DUPLICATE_WINDOW_SECONDS` — same normalized name+symbol cluster window; default `900` (15 min).
+- `CREATOR_WINDOW_SECONDS` — creator multi-launch window; default `1800` (30 min).
+- `CREATOR_LAUNCH_LIMIT` — first N distinct launches are allowed in the creator window; default `3`.
+
+The listener starts at the current chain head on first boot, so enabling it will not flood Telegram with historical launches. It indexes the active and legacy PONS factories, reads token name/symbol on-chain, applies duplicate-name and creator multi-launch filtration, and queues only the first qualifying launch for the private admin. Filtered launches remain in SQLite for testing/analysis.
+
+## EmberCurve intake (pre-filtration phase)
+Set `EMBER_ENABLED=true` to enable the EmberCurve launch intake. It polls Ember's public market data and snapshots the current market set on first startup so existing launches do not flood Telegram. New mints observed after startup are queued as private-pilot alerts.
+
+Optional settings:
+- `EMBER_MARKETS_URL` (default `https://embercurve.fun/api/solana/markets`)
+- `EMBER_POLL_SECONDS` (default `15`)
+
+Per the current build plan, shared duplicate/creator filtration is intentionally not applied to Ember yet. We will finish launchpad intake first, add Pump.fun, then route all launchpads through one global filter and user launchpad preferences.
+
+## Pump.fun intake
+Pump.fun launch intake is intentionally upstream of the future shared filtration layer.
+
+Environment:
+- `PUMPFUN_ENABLED=true`
+- `SOLANA_RPC_URL=<your Solana JSON-RPC endpoint>` (recommended: a dedicated provider; public RPC may rate-limit)
+- `PUMPFUN_POLL_SECONDS=8`
+- `PUMPFUN_SIGNATURE_LIMIT=100`
+
+The scanner watches the official Pump program, decodes `create_v2`, stores mint/name/symbol/creator/URI, snapshots the current head on first boot, and only alerts on launches observed after initialization. Duplicate/creator filtration is deliberately not applied here yet.
+
+## Unified launch model
+All five launchpads now write discoveries into `unified_launches` through `launch_model.py`.
+The canonical fields are chain, launchpad, contract/mint, creator, name, symbol, pair,
+source transaction/height, launch time, bonding progress, migration state and source metadata.
+
+This is intentionally an intake layer only. Global duplicate-name clustering, creator rapid-launch
+filtration and per-user launchpad routing should consume `unified_launches` in the next stage instead
+of being implemented separately inside each scanner. The earlier PONS-only filter has been removed
+from its alert path so all launchpads reach the same intake stage first.
+
+Canonical launchpads: `flap`, `stonk`, `pons`, `embercurve`, `pumpfun`.
+Canonical chains: `bnb`, `solana`, `robinhood`.
+
+## Global filtration pipeline
+
+Launch scanners write every detected launch to `unified_launches`. `global_filter.py` consumes rows in `pipeline_state=intake` and applies the shared rules across all launchpads before creating the canonical `global_outbox` alert.
+
+Defaults:
+- `GLOBAL_FILTER_ENABLED=true`
+- `GLOBAL_FILTER_POLL_SECONDS=3`
+- `DUPLICATE_WINDOW_SECONDS=900` (15 minutes)
+- `CREATOR_WINDOW_SECONDS=1800` (30 minutes)
+- `CREATOR_LAUNCH_LIMIT=3` (first three distinct launches allowed; fourth+ in-window filtered)
+
+Decisions are persisted in `global_filter_decisions`; unified rows become `approved` or `filtered`. New creator wallets are not penalized merely for having no history. Duplicate clustering is chain-wide, so the same normalized name+symbol appearing through two launchpads on the same chain is treated as one cluster while each contract address remains its own token identity.
+
+The legacy launchpad outboxes are still populated for backward-compatible scanner tests/rollback, but with the global pipeline enabled they should be treated as non-canonical launch queues. `global_outbox` is the canonical filtered launch-alert queue. Existing launchpad-specific bonding alerts remain separate until lifecycle events are unified.
+
+## Per-user launchpad alert selection
+Approved launches are now routed by `alert_router.py` after the global filter. Users can run `/alerts` and toggle Flap, STOnK, PONS, EmberCurve, or Pump.fun independently, or enable/disable all. New users default to all launchpads enabled so existing behavior is preserved.
+
+Routing order: scanners -> `unified_launches` -> global filter -> alert router -> `global_outbox` -> Telegram.
+
+`PUBLIC_ALERTS_ENABLED=false` (default) keeps routing private to `ADMIN_CHAT_ID` for testing. When public routing is intentionally enabled, set `PUBLIC_ALERTS_ENABLED=true`; registered users then receive only approved launches from launchpads they enabled. `ALERT_ROUTER_POLL_SECONDS` defaults to 3 seconds.
+
+## Token X + website metadata links
+
+The unified launch model now normalizes optional token-supplied social links into `social_x_url` and `website_url`. X links are accepted only from x.com/twitter.com and website links must be HTTP(S). Approved global alerts add Telegram `𝕏 X` and/or `🌐 Website` buttons only when those links are present in launch metadata. Pump.fun `create_v2` metadata URIs are fetched as bounded public JSON (including `ipfs://` via an HTTPS gateway) so its optional `twitter` and `website` fields can flow into the unified model. No social link is guessed from a token name or ticker.
