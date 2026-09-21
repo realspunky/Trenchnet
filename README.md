@@ -160,3 +160,6 @@ Routing order: scanners -> `unified_launches` -> global filter -> alert router -
 ## Token X + website metadata links
 
 The unified launch model now normalizes optional token-supplied social links into `social_x_url` and `website_url`. X links are accepted only from x.com/twitter.com and website links must be HTTP(S). Approved global alerts add Telegram `𝕏 X` and/or `🌐 Website` buttons only when those links are present in launch metadata. Pump.fun `create_v2` metadata URIs are fetched as bounded public JSON (including `ipfs://` via an HTTPS gateway) so its optional `twitter` and `website` fields can flow into the unified model. No social link is guessed from a token name or ticker.
+
+## Alert preference routing fix
+When `GLOBAL_FILTER_ENABLED=true`, launchpad scanners no longer deliver their legacy per-launchpad outboxes directly. All launch alerts are delivered only by `alert_router.py`, which applies each user's `/alerts` launchpad preferences. This prevents disabled launchpads (for example Flap) from bypassing a Pump.fun-only selection.

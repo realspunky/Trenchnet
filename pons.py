@@ -116,7 +116,8 @@ def run():
     while True:
         try:
             scanner.scan()
-            for _ in range(10):deliver(c,token,api,table='pons_outbox');time.sleep(.5)
+            if os.environ.get('GLOBAL_FILTER_ENABLED','true')!='true':
+                for _ in range(10):deliver(c,token,api,table='pons_outbox');time.sleep(.5)
         except Exception as e:
             scanner.health('PONS retrying: '+type(e).__name__)
             print('PONS retrying: '+type(e).__name__,flush=True)

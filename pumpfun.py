@@ -148,7 +148,8 @@ def run():
  while True:
   try:
    s.scan()
-   for _ in range(10):deliver(c,token,api,table='pumpfun_outbox');time.sleep(.5)
+   if os.environ.get('GLOBAL_FILTER_ENABLED','true')!='true':
+    for _ in range(10):deliver(c,token,api,table='pumpfun_outbox');time.sleep(.5)
   except Exception as e:
    s.health('Pump.fun retrying: '+type(e).__name__);print('Pump.fun retrying: '+type(e).__name__,flush=True)
   time.sleep(int(os.environ.get('PUMPFUN_POLL_SECONDS','8')))

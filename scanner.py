@@ -206,7 +206,8 @@ def run():
         try:
             if scanner is None:scanner=Scanner(c,url,recipient)
             scanner.scan()
-            deliver(c,token,api)
+            if os.environ.get('GLOBAL_FILTER_ENABLED','true')!='true':
+                deliver(c,token,api)
         except Exception as e:
             # Type is useful without risking API key disclosure in exception text.
             print('Scanner paused/retrying: '+type(e).__name__,flush=True)

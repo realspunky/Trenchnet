@@ -164,9 +164,10 @@ def run():
         delay=60
         try:
             scanner.scan()
-            for _ in range(5):
-                deliver(c,token,api,table='stonk_outbox')
-                time.sleep(1)
+            if os.environ.get('GLOBAL_FILTER_ENABLED','true')!='true':
+                for _ in range(5):
+                    deliver(c,token,api,table='stonk_outbox')
+                    time.sleep(1)
         except RateLimited as e:
             delay=e.delay;scanner.health('Stonk rate limited; waiting for provider retry window')
         except Exception as e:
