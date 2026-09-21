@@ -124,7 +124,11 @@ class Scanner:
             self.c.execute('UPDATE stonk_cursor SET since=? WHERE id=1',(max(since,watermark),))
         threshold_row=self.c.execute('SELECT threshold FROM users WHERE id=?',(self.recipient,)).fetchone()
         threshold=threshold_row[0] if threshold_row else 80
-        rows=self.c.execute("SELECT mint,created,attempts FROM stonk_tokens WHERE status IN ('pending','tracking','retry') AND next_check<=? ORDER BY next_check LIMIT 8",(now,)).fetchall()
+        # Prioritize genuinely new launches so historical tracking/retry rows cannot starve alerts.
+        fresh_rows=self.c.execute("SELECT mint,created,attempts FROM stonk_tokens WHERE status='pending' AND next_check<=? ORDER BY created DESC LIMIT 24",(now,)).fetchall()
+        remaining=max(0,24-len(fresh_rows))
+        maintenance=self.c.execute("SELECT mint,created,attempts FROM stonk_tokens WHERE status IN ('tracking','retry') AND next_check<=? ORDER BY next_check LIMIT ?",(now,remaining)).fetchall() if remaining else []
+        rows=fresh_rows+maintenance
         failures=0
         for mint,created,attempts in rows:
             try:
@@ -150,7 +154,7 @@ class Scanner:
                 with self.c:self.c.execute('UPDATE stonk_tokens SET status=?,attempts=?,next_check=? WHERE mint=?',
                     ('review' if attempts>=4 else 'retry',attempts+1,time.time()+min(600,60*2**attempts),mint))
                 print('Stonk token read failed: '+mint+' ('+type(e).__name__+')',flush=True)
-        self.health(f'Stonk API polling (bonding alerts disabled pending validation); {len(records)} launch records checked; {failures} token read failures this cycle')
+        self.health(f'Stonk API polling; {len(records)} launch records checked; fresh_pending={len(fresh_rows)}; serviced={len(rows)}; {failures} token read failures this cycle')
 
 def run():
     if os.environ.get('STONK_ENABLED')!='true':return

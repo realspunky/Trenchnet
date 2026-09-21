@@ -201,3 +201,11 @@ Use dedicated `SOLANA_RPC_URL` and `PONS_RPC_URL` endpoints for production relia
 - PONS `eth_getLogs` requests default to 10-block chunks (`PONS_LOG_BLOCK_CHUNK=10`) for provider compatibility.
 - EmberCurve now uses the public `/markets` developer surface and transparently falls back from the older `/api/solana/markets` setting.
 - `/status` now includes EmberCurve and Pump.fun scanner health in addition to Flap, STOnK and PONS.
+
+## Pipeline recovery build (2026-09-21)
+- STOnK now prioritizes fresh pending launches over historical tracking/retry maintenance rows.
+- Global filter uses fair per-launchpad intake under backlog pressure, preventing PONS/STOnK/Pump/Ember/Flap starvation.
+- Global filter errors and backlog are visible in /status.
+- Pump.fun RPC calls retry temporary HTTP 408/425/429/5xx and common transient Solana RPC errors with backoff; cursor is not advanced on a failed scan.
+- Ember validates JSON responses, uses browser-compatible request headers, and tries canonical API variants before reporting a detailed source error.
+- Existing freshness and preference gates remain enabled; no database reset is required.

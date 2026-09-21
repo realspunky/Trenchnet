@@ -1,10 +1,11 @@
 """EmberCurve launch intake. Public read-only API; filtration intentionally happens later."""
 import json, os, time, urllib.request
+from urllib.error import HTTPError
 from scanner import clean, deliver
 from launch_model import setup as unified_setup, record as record_launch
 
-API=os.environ.get('EMBER_MARKETS_URL','https://embercurve.fun/markets')
-LEGACY_API='https://embercurve.fun/api/solana/markets'
+API=os.environ.get('EMBER_MARKETS_URL','https://embercurve.fun/api/solana/markets')
+CANONICAL_API='https://embercurve.fun/api/solana/markets'
 
 def setup(c):
     c.executescript('''
@@ -20,21 +21,30 @@ def setup(c):
     unified_setup(c)
 
 def fetch(url=API):
-    # Ember's public developer surface is /markets. Older TrenchNet builds used
-    # /api/solana/markets; transparently fall back so an old Railway variable
-    # cannot silently disable Ember alerts.
-    urls=[url]
-    if url==LEGACY_API: urls.append('https://embercurve.fun/markets')
-    last=None
-    for candidate in urls:
+    # Ember documents a public JSON market feed. Try the configured endpoint first,
+    # then canonical API variants. Validate the body before decoding so HTML/CDN
+    # responses cannot masquerade as JSON failures.
+    configured=(url or '').strip()
+    candidates=[]
+    for u in (configured,CANONICAL_API,CANONICAL_API+'?sort=new',CANONICAL_API+'?limit=1000'):
+        if u and u not in candidates and u.rstrip('/')!='https://embercurve.fun/markets': candidates.append(u)
+    errors=[]
+    for candidate in candidates:
+        req=urllib.request.Request(candidate,headers={'Accept':'application/json, text/plain, */*','Accept-Encoding':'identity','Referer':'https://embercurve.fun/','User-Agent':'Mozilla/5.0 TrenchNet/1.2','Cache-Control':'no-cache'})
         try:
-            req=urllib.request.Request(candidate,headers={'Accept':'application/json','User-Agent':'TrenchNet/1.0'})
             with urllib.request.urlopen(req,timeout=20) as r:
-                raw=r.read(5_000_001)
-                if len(raw)>5_000_000:raise ValueError('Ember response too large')
-                return json.loads(raw)
-        except Exception as e:last=e
-    raise last
+                raw=r.read(5_000_001); status=getattr(r,'status',200); ctype=(r.headers.get('Content-Type') or '').lower()
+            if len(raw)>5_000_000: raise ValueError('response too large')
+            lead=raw.lstrip()[:1]
+            if lead not in (b'{',b'['):
+                errors.append(f'{status} non-JSON {ctype or "unknown"}'); continue
+            return json.loads(raw.decode('utf-8'))
+        except HTTPError as e:
+            errors.append('HTTP '+str(e.code))
+        except Exception as e:
+            errors.append(type(e).__name__+': '+str(e)[:80])
+    raise ValueError('Ember market API unavailable: '+' | '.join(errors[-4:]))
+
 
 def rows(payload):
     if isinstance(payload,list):return payload
@@ -123,6 +133,7 @@ def run():
             if os.environ.get('GLOBAL_FILTER_ENABLED','true')!='true':
                 for _ in range(10):deliver(c,token,api,table='ember_outbox');time.sleep(.5)
         except Exception as e:
-            s.health('EmberCurve retrying: '+type(e).__name__);print('EmberCurve retrying: '+type(e).__name__,flush=True)
+            msg='EmberCurve retrying: '+type(e).__name__+': '+str(e)[:180]
+            s.health(msg);print(msg,flush=True)
         time.sleep(int(os.environ.get('EMBER_POLL_SECONDS','15')))
 if __name__=='__main__':run()

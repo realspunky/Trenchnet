@@ -81,6 +81,14 @@ def reply(c, user_id, text):
             else:
                 monitoring += '\nPrivate scanner has not reported yet'
             try:
+                gf=c.execute('SELECT checked,message FROM global_filter_health WHERE id=1').fetchone()
+            except sqlite3.OperationalError:
+                gf=None
+            if gf:
+                age=max(0,int(time.time())-gf[0])
+                monitoring += f'\nFilter: {gf[1]}\nFilter update: {age}s ago'
+                if age>30: monitoring += ' (stale; filter worker may be stopped)'
+            try:
                 stonk_health=c.execute('SELECT updated,status FROM stonk_health WHERE id=1').fetchone()
             except sqlite3.OperationalError:
                 stonk_health=None
@@ -101,9 +109,15 @@ def reply(c, user_id, text):
                 age=max(0,int(time.time())-pons_health[0])
                 monitoring += f'\nPONS: {pons_health[1]}\nPONS update: {age}s ago'
                 if age>180:monitoring += ' (stale; check logs)'
-                for label,table,column in [('PONS tokens','pons_tokens','status'),('PONS deliveries','pons_outbox','state')]:
-                    rows=c.execute(f'SELECT {column},COUNT(*) FROM {table} GROUP BY {column}').fetchall()
-                    monitoring += '\n'+label+': '+(', '.join(f'{k}={v}' for k,v in rows) or 'none yet')
+                if os.environ.get('GLOBAL_FILTER_ENABLED','true')=='true':
+                    ps=c.execute("SELECT pipeline_state,COUNT(*) FROM unified_launches WHERE launchpad='pons' GROUP BY pipeline_state").fetchall()
+                    monitoring += '\nPONS unified: '+(', '.join(f'{k}={v}' for k,v in ps) or 'none yet')
+                    gd=c.execute("SELECT reason,COUNT(*) FROM global_filter_decisions d JOIN unified_launches u ON u.event_key=d.event_key WHERE u.launchpad='pons' GROUP BY reason").fetchall()
+                    monitoring += '\nPONS decisions: '+(', '.join(f'{k}={v}' for k,v in gd) or 'none yet')
+                else:
+                    for label,table,column in [('PONS tokens','pons_tokens','status'),('PONS deliveries','pons_outbox','state')]:
+                        rows=c.execute(f'SELECT {column},COUNT(*) FROM {table} GROUP BY {column}').fetchall()
+                        monitoring += '\n'+label+': '+(', '.join(f'{k}={v}' for k,v in rows) or 'none yet')
             elif os.environ.get('PONS_ENABLED')=='true':
                 monitoring += '\nPONS scanner has not reported yet'
             for label,enabled,health_table,token_table,outbox_table in [

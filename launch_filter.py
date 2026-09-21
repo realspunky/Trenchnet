@@ -46,9 +46,17 @@ def assess(c, *, chain, launchpad, address, creator, name, symbol, now=None,
     cutoff = now - int(duplicate_window)
     creator_cutoff = now - int(creator_window)
 
-    duplicate = c.execute('''SELECT COUNT(*),COUNT(DISTINCT creator) FROM launch_observations
-        WHERE chain=? AND name_key=? AND symbol_key=? AND observed>=? AND address<>?''',
-        (chain,name_key,symbol_key,cutoff,address_key)).fetchone()
+    # Missing/generic metadata must never make unrelated contracts look like duplicates.
+    # This is especially important for fresh PONS tokens whose ERC-20 name/symbol calls
+    # can briefly fail immediately after launch.
+    generic_name = name_key in {'', 'unknowntoken', 'unknown', 'token'}
+    generic_symbol = symbol_key in {'', 'unknown'}
+    if generic_name or generic_symbol:
+        duplicate = (0, 0)
+    else:
+        duplicate = c.execute('''SELECT COUNT(*),COUNT(DISTINCT creator) FROM launch_observations
+            WHERE chain=? AND name_key=? AND symbol_key=? AND observed>=? AND address<>?''',
+            (chain,name_key,symbol_key,cutoff,address_key)).fetchone()
     creator_count = 0
     if creator_key:
         creator_count = c.execute('''SELECT COUNT(DISTINCT address) FROM launch_observations

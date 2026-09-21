@@ -1,5 +1,6 @@
 """Pump.fun launch intake via Solana JSON-RPC. Filtration intentionally happens later."""
 import hashlib,json,os,struct,time,urllib.request,ipaddress,socket
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from scanner import clean,deliver
 from launch_model import setup as unified_setup, record as record_launch
@@ -24,11 +25,30 @@ def setup(c):
 
 def rpc(method,params,url=RPC):
  data=json.dumps({'jsonrpc':'2.0','id':1,'method':method,'params':params}).encode()
- req=urllib.request.Request(url,data=data,headers={'Content-Type':'application/json','User-Agent':'TrenchNet-private-pilot/1.0'})
- with urllib.request.urlopen(req,timeout=25) as r:
-  x=json.loads(r.read(5_000_001))
- if x.get('error'):raise RuntimeError('Solana RPC: '+str(x['error']))
- return x.get('result')
+ last=None
+ for attempt in range(4):
+  req=urllib.request.Request(url,data=data,headers={'Content-Type':'application/json','Accept':'application/json','User-Agent':'TrenchNet-private-pilot/1.1'})
+  try:
+   with urllib.request.urlopen(req,timeout=25) as r:
+    raw=r.read(5_000_001); x=json.loads(raw)
+   if x.get('error'):
+    code=(x.get('error') or {}).get('code') if isinstance(x.get('error'),dict) else None
+    if code in {-32005,-32004,-32002} and attempt<3:
+     time.sleep(1.5*(2**attempt)); continue
+    raise RuntimeError('Solana RPC error '+str(code)+': '+str((x.get('error') or {}).get('message',''))[:120])
+   return x.get('result')
+  except HTTPError as e:
+   last=RuntimeError('Solana RPC HTTP '+str(e.code))
+   if e.code in (408,425,429,500,502,503,504) and attempt<3:
+    try: wait=float(e.headers.get('Retry-After') or 0)
+    except Exception: wait=0
+    time.sleep(max(wait,1.5*(2**attempt))); continue
+   raise last
+  except URLError as e:
+   last=RuntimeError('Solana RPC network error: '+str(getattr(e,'reason','network'))[:100])
+   if attempt<3: time.sleep(1.5*(2**attempt)); continue
+   raise last
+ raise last or RuntimeError('Solana RPC request failed')
 
 def b58decode(s):
  n=0
@@ -170,6 +190,7 @@ def run():
    if os.environ.get('GLOBAL_FILTER_ENABLED','true')!='true':
     for _ in range(10):deliver(c,token,api,table='pumpfun_outbox');time.sleep(.5)
   except Exception as e:
-   s.health('Pump.fun retrying: '+type(e).__name__);print('Pump.fun retrying: '+type(e).__name__,flush=True)
+   detail=(str(e) or type(e).__name__)[:160]
+   s.health('Pump.fun retrying: '+detail);print('Pump.fun retrying: '+detail,flush=True)
   time.sleep(int(os.environ.get('PUMPFUN_POLL_SECONDS','8')))
 if __name__=='__main__':run()
