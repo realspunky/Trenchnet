@@ -40,7 +40,7 @@ def process(c,now=None,limit=100):
       u.source_height,u.bonding_progress,u.migrated,u.social_x_url,u.website_url,d.duplicate_count,d.unique_creators,d.creator_launches
       FROM unified_launches u JOIN global_filter_decisions d ON d.event_key=u.event_key
       LEFT JOIN alert_route_state r ON r.event_key=u.event_key
-      WHERE d.allow=1 AND r.event_key IS NULL ORDER BY u.launched_at,u.id LIMIT ?''',(int(limit),)).fetchall()
+      WHERE d.allow=1 AND r.event_key IS NULL ORDER BY u.first_seen,u.id LIMIT ?''',(int(limit),)).fetchall()
     queued=0
     for x in rows:
         row=x[:13]; decision={'duplicates':x[13],'unique_creators':x[14],'creator_launches':x[15]}
@@ -79,6 +79,15 @@ def deliver_selected(c,token,send):
     enforce_preferences(c)
     return deliver(c,token,send,table='global_outbox')
 
+def drain(c,token,send,limit=100):
+    # Enforce once per batch, then drain immediately. No fixed sleep between pads.
+    enforce_preferences(c)
+    handled=0
+    for _ in range(int(limit)):
+        if not deliver(c,token,send,table='global_outbox'): break
+        handled+=1
+    return handled
+
 def run():
     from bot import database,api
     c=database(); setup(c); token=os.environ['TELEGRAM_BOT_TOKEN']
@@ -86,7 +95,7 @@ def run():
     while True:
         try:
             process(c)
-            for _ in range(20): deliver_selected(c,token,api); time.sleep(.25)
+            drain(c,token,api)
         except Exception as e: print('Alert router error: '+type(e).__name__+': '+str(e),flush=True)
         time.sleep(float(os.environ.get('ALERT_ROUTER_POLL_SECONDS','3')))
 if __name__=='__main__':run()

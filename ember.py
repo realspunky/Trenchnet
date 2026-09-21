@@ -78,9 +78,14 @@ class Scanner:
         with self.c:
             for t in markets:
                 old=self.c.execute('SELECT graduated FROM ember_tokens WHERE mint=?',(t['mint'],)).fetchone()
-                record_launch(self.c,chain='solana',launchpad='embercurve',address=t['mint'],creator=t['creator'],
-                  name=t['name'],symbol=t['symbol'],pair_symbol=t['pair_symbol'],launched_at=now,bonding_progress=t['progress'],
-                  migrated=t['graduated'],source_table='ember_tokens',metadata=t,now=now)
+                if initialized and old is None:
+                    record_launch(self.c,chain='solana',launchpad='embercurve',address=t['mint'],creator=t['creator'],
+                      name=t['name'],symbol=t['symbol'],pair_symbol=t['pair_symbol'],launched_at=now,bonding_progress=t['progress'],
+                      migrated=t['graduated'],source_table='ember_tokens',metadata=t,now=now)
+                elif old is not None and self.c.execute("SELECT 1 FROM unified_launches WHERE launchpad='embercurve' AND address=?",(t['mint'],)).fetchone():
+                    record_launch(self.c,chain='solana',launchpad='embercurve',address=t['mint'],creator=t['creator'],
+                      name=t['name'],symbol=t['symbol'],pair_symbol=t['pair_symbol'],launched_at=now,bonding_progress=t['progress'],
+                      migrated=t['graduated'],source_table='ember_tokens',metadata=t,now=now)
                 self.c.execute('''INSERT INTO ember_tokens(mint,name,symbol,creator,pair_symbol,progress,graduated,first_seen,last_seen,snapshot)
                   VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(mint) DO UPDATE SET name=excluded.name,symbol=excluded.symbol,
                   creator=excluded.creator,pair_symbol=excluded.pair_symbol,progress=excluded.progress,graduated=excluded.graduated,

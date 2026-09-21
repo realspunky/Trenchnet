@@ -170,3 +170,12 @@ The unified alert router now migrates older persistent `global_outbox` tables to
 
 ### Alert preference enforcement fix
 The `/alerts` preference is now checked twice for all five launchpads: once when a globally-approved launch is routed, and again immediately before Telegram delivery. Pending alerts queued before a user changes selection are marked `preference_blocked` and cannot leak through. This applies equally to Flap, STOnK, PONS, EmberCurve and Pump.fun.
+
+## 2026-09-21 reliability fix
+- Alert preferences remain authoritative for all five launchpads at routing and immediately before Telegram delivery.
+- Global outbox now drains without an artificial per-alert sleep, reducing cross-launchpad latency (for example STOnK + Flap together).
+- Flap enters unified intake only after its contract inspection succeeds, preserving bonding progress in the unified alert and keeping the existing verified-candidate gate.
+- PONS token name/symbol reads are best-effort: broken metadata no longer blocks the factory launch event from entering unified intake.
+- PONS health now reports new logs plus unified intake/approved counts.
+- EmberCurve first poll is a baseline only; it no longer turns every pre-existing market into a fresh unified launch. New markets after initialization enter the pipeline normally.
+- Pump.fun keeps its first-run head snapshot behavior and metadata social-link extraction.

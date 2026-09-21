@@ -42,8 +42,14 @@ def setup(c):
     with c:c.execute("UPDATE pons_outbox SET state='uncertain' WHERE state='sending'")
 
 def metadata(w3,address):
+    """Best-effort display metadata; broken token metadata never hides a launch."""
     token=w3.eth.contract(address=Web3.to_checksum_address(address),abi=TOKEN_ABI)
-    return clean(token.functions.name().call()),clean(token.functions.symbol().call(),30)
+    name='Unknown token'; symbol=''
+    try: name=clean(token.functions.name().call()) or 'Unknown token'
+    except Exception: pass
+    try: symbol=clean(token.functions.symbol().call(),30)
+    except Exception: pass
+    return name,symbol
 
 def alert_body(t,decision):
     extra=''
@@ -104,7 +110,9 @@ class Scanner:
         tip=self.w3.eth.block_number;found=0
         for factory,start in self.factories:found+=self.scan_factory(factory,start,tip)
         total=self.c.execute("SELECT COUNT(*) FROM unified_launches WHERE launchpad='pons'").fetchone()[0]
-        self.health(f'PONS: block {tip}; {found} new launch logs processed; {total} launches in unified intake')
+        pending=self.c.execute("SELECT COUNT(*) FROM unified_launches WHERE launchpad='pons' AND pipeline_state='intake'").fetchone()[0]
+        approved=self.c.execute("SELECT COUNT(*) FROM unified_launches WHERE launchpad='pons' AND pipeline_state='approved'").fetchone()[0]
+        self.health(f'PONS: block {tip}; {found} new launch logs; unified total {total}; intake {pending}; approved {approved}')
 
 def run():
     if os.environ.get('PONS_ENABLED')!='true':return

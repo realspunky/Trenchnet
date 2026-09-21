@@ -53,9 +53,6 @@ def persist_batch(c, tokens, height, block_hash):
         for t in tokens:
             c.execute('INSERT OR IGNORE INTO scan_tokens(address,name,symbol,tx,created,height) VALUES (?,?,?,?,?,?)',
                       tuple(t[k] for k in ['address','name','symbol','tx','created','height']))
-            record_launch(c,chain='bnb',launchpad='flap',address=t['address'],creator=t.get('creator',''),
-                name=t['name'],symbol=t['symbol'],source_tx=t['tx'],source_height=t['height'],
-                launched_at=t['created'],source_table='scan_tokens',metadata=t)
         c.execute('INSERT OR REPLACE INTO scan_cursor VALUES (1,?,?)',(height,block_hash))
 
 def minimum_balance(s):
@@ -140,6 +137,12 @@ class Scanner:
                 elif s['verified']:status='tracking'
                 else:status='excluded'
                 with self.c:
+                    if s.get('verified') and s.get('status')==1:
+                        meta=dict(t); meta.update(s)
+                        record_launch(self.c,chain='bnb',launchpad='flap',address=t['address'],creator=t.get('creator',''),
+                            name=t['name'],symbol=t['symbol'],source_tx=t['tx'],source_height=s.get('block_number',t['height']),
+                            launched_at=t['created'],bonding_progress=s.get('bonding_percent'),migrated=s.get('migrated',False),
+                            source_table='scan_tokens',metadata=meta,now=now)
                     queue_candidate(self.c,t,s,self.recipient,threshold,now)
                     self.c.execute('UPDATE scan_tokens SET status=?,snapshot=?,next_check=?,attempts=0 WHERE address=?',
                           (status,json.dumps(s),now+30,t['address']))
@@ -174,7 +177,7 @@ def deliver(c,token,send,table="pilot_outbox"):
     with c:
         c.execute(f"UPDATE {table} SET state='expired' WHERE state='pending' AND expires<=?",(int(time.time()),))
     row=c.execute(f"SELECT id,recipient,body,attempts FROM {table} WHERE state='pending' AND next_attempt<=? ORDER BY id LIMIT 1",(int(time.time()),)).fetchone()
-    if not row:return
+    if not row:return False
     ident,recipient,text,attempts=row
     with c:c.execute(f"UPDATE {table} SET state='sending' WHERE id=?",(ident,))
     try:
@@ -192,6 +195,7 @@ def deliver(c,token,send,table="pilot_outbox"):
     except Exception:
         with c:c.execute(f"UPDATE {table} SET state='uncertain' WHERE id=?",(ident,))
         print('Private alert delivery uncertain; retained for review, not resent.',flush=True)
+    return True
 
 def run():
     if os.environ.get('SCANNER_ENABLED')!='true':
