@@ -141,10 +141,14 @@ class Scanner:
             try:
                 data,generated=self.get('/tokens/'+mint)
                 s=normalize(data,mint)
-                record_launch(self.c,chain='solana',launchpad='stonk',address=mint,name=s['name'],symbol=s['symbol'],
-                    launched_at=int(created),bonding_progress=s['progress'],migrated=s['status']=='graduated',
-                    source_table='stonk_tokens',metadata=s)
                 status='migrated' if s['status']=='graduated' else ('tracking' if s['eligible'] else 'excluded')
+                # Only holder-reward launches with an allowed 1%-3% transfer tax may
+                # enter the unified alert pipeline. Metadata resolution alone is not
+                # enough to qualify a STOnK launch.
+                if s['eligible']:
+                    record_launch(self.c,chain='solana',launchpad='stonk',address=mint,name=s['name'],symbol=s['symbol'],
+                        launched_at=int(created),bonding_progress=s['progress'],migrated=s['status']=='graduated',
+                        source_table='stonk_tokens',metadata=s)
                 items=[]
                 if status=='tracking':
                     if 0<=time.time()-created<=600:items.append(('launch','New launch'))

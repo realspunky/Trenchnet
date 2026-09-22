@@ -4,7 +4,7 @@ Every launchpad first writes to unified_launches. This worker is the only launch
 path: it applies the same duplicate-cluster and creator-velocity rules across all
 launchpads before queuing Telegram delivery.
 """
-import os, sqlite3, time
+import json, os, sqlite3, time
 from launch_filter import assess
 from scanner import deliver
 
@@ -38,6 +38,24 @@ def setup(c):
     c.commit()
 
 
+
+def holder_reward_policy(launchpad, metadata):
+    """Fail closed for launchpads where TrenchNet promises tax-funded holder rewards.
+
+    Other launchpads use the general launch filter and are not claimed to have this
+    reward model.
+    """
+    try:
+        meta=json.loads(metadata or '{}') if isinstance(metadata,str) else (metadata or {})
+    except (TypeError,ValueError,json.JSONDecodeError):
+        return False if launchpad in {'flap','stonk'} else True
+    if launchpad=='flap':
+        rate=meta.get('token_tax_bps')
+        return meta.get('verified') is True and meta.get('holder_rewards') is True and rate in {100,200,300}
+    if launchpad=='stonk':
+        return meta.get('eligible') is True and meta.get('rate') in {100,200,300} and bool(meta.get('reward_mint'))
+    return True
+
 def explorer(chain,address):
     if chain=='bnb': return 'https://bscscan.com/token/'+address
     if chain=='solana': return 'https://solscan.io/token/'+address
@@ -49,11 +67,26 @@ def alert_body(row, decision):
     event_key,chain,launchpad,address,creator,name,symbol,pair_symbol,source_height,bonding,migrated,*links=row
     social_x_url=links[0] if len(links)>0 else ''
     website_url=links[1] if len(links)>1 else ''
+    try: metadata=json.loads(links[2] or '{}') if len(links)>2 else {}
+    except (TypeError,ValueError,json.JSONDecodeError): metadata={}
     pad={'flap':'Flap','stonk':'STOnK','pons':'PONS','embercurve':'EmberCurve','pumpfun':'Pump.fun'}.get(launchpad,launchpad)
     title=(name or 'Unknown token') + (f' ({symbol})' if symbol else '')
     lines=['📣 TRENCHNET — NEW LAUNCH',f'🪙 {title}',f'🌐 Network: {chain.title()}',f'🚀 Launchpad: {pad}',f'📋 Contract: {address}']
     if creator: lines.append(f'👤 Creator: {creator}')
     if pair_symbol: lines.append(f'💱 Pair: {pair_symbol}')
+    if launchpad=='flap':
+        rate=metadata.get('token_tax_bps')
+        if rate in {100,200,300}: lines.append(f'💸 Token tax: {rate/100:g}%')
+        if metadata.get('holder_rewards') is True:
+            alloc=metadata.get('dividend_allocation_bps')
+            lines.append('💰 Holder rewards: Enabled' + (f' ({alloc/100:g}% allocation)' if isinstance(alloc,(int,float)) else ''))
+            if metadata.get('reward_token'): lines.append(f'🎁 Reward asset: {metadata["reward_token"]}')
+    elif launchpad=='stonk':
+        rate=metadata.get('rate')
+        if rate in {100,200,300}: lines.append(f'💸 Transfer tax: {rate/100:g}%')
+        if metadata.get('eligible') is True:
+            reward=metadata.get('reward_symbol') or metadata.get('reward_mint') or 'Enabled'
+            lines.append(f'💰 Holder rewards: {reward}')
     if decision.get('creator_launches',1)>1: lines.append(f'🔁 Creator launches (window): {decision["creator_launches"]}')
     if bonding is not None: lines.append(f'📈 Bonding progress: {float(bonding):.2f}%')
     if migrated: lines.append('🎓 Status: Migrated / graduated')
@@ -73,7 +106,7 @@ def process(c, recipient, now=None, limit=100, duplicate_window=None, creator_wi
     creator_limit=int(os.environ.get('CREATOR_LAUNCH_LIMIT','3') if creator_limit is None else creator_limit)
     batch=int(os.environ.get('GLOBAL_FILTER_BATCH_SIZE','1000') if limit==100 else limit)
     pads=('flap','stonk','pons','embercurve','pumpfun')
-    select_cols="event_key,chain,launchpad,address,creator,name,symbol,pair_symbol,source_height,bonding_progress,migrated,launched_at"
+    select_cols="event_key,chain,launchpad,address,creator,name,symbol,pair_symbol,source_height,bonding_progress,migrated,launched_at,metadata"
     total_intake=c.execute("SELECT COUNT(*) FROM unified_launches WHERE pipeline_state='intake'").fetchone()[0]
     if total_intake<=batch:
         # Preserve strict arrival order when the queue is small; duplicate/creator rules are order-sensitive.
@@ -92,8 +125,10 @@ def process(c, recipient, now=None, limit=100, duplicate_window=None, creator_wi
     allowed=blocked=0
     for row in rows:
         event_key,chain,launchpad,address,creator,name,symbol,*_=row
-        launched_at=int(row[-1] or 0); max_age=int(os.environ.get('MAX_LAUNCH_AGE_SECONDS','600'))
-        if launched_at and (launched_at < now-max_age or launched_at > now+120):
+        launched_at=int(row[-2] or 0); metadata=row[-1]; max_age=int(os.environ.get('MAX_LAUNCH_AGE_SECONDS','600'))
+        if not holder_reward_policy(launchpad,metadata):
+            decision={'allow':False,'reason':'holder_reward_policy','duplicates':1,'unique_creators':1,'creator_launches':1}
+        elif launched_at and (launched_at < now-max_age or launched_at > now+120):
             decision={'allow':False,'reason':'stale_launch','duplicates':1,'unique_creators':1,'creator_launches':1}
         else:
             decision=assess(c,chain=chain,launchpad=launchpad,address=address,creator=creator,name=name,symbol=symbol,now=now,duplicate_window=duplicate_window,creator_window=creator_window,creator_limit=creator_limit)

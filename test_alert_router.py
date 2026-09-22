@@ -25,7 +25,8 @@ def test_every_launchpad_preference_is_independent(monkeypatch):
   chain={'flap':'bnb','pons':'robinhood'}.get(selected,'solana')
   for i,pad in enumerate(LAUNCHPADS):
    ch={'flap':'bnb','pons':'robinhood'}.get(pad,'solana')
-   record(c,chain=ch,launchpad=pad,address=f'{pad}{i}',name=f'N{i}',symbol=f'S{i}',creator=f'C{i}',now=1000+i)
+   meta=({'verified':True,'token_tax_bps':300,'holder_rewards':True} if pad=='flap' else {'eligible':True,'rate':300,'reward_mint':'Q'} if pad=='stonk' else {})
+   record(c,chain=ch,launchpad=pad,address=f'{pad}{i}',name=f'N{i}',symbol=f'S{i}',creator=f'C{i}',now=1000+i,metadata=meta)
   filter_process(c,0,now=1010)
   process(c,now=1011)
   pads=[r[0] for r in c.execute("SELECT u.launchpad FROM global_outbox o JOIN unified_launches u ON u.event_key=o.event_key WHERE o.state='pending'").fetchall()]
@@ -37,7 +38,7 @@ def test_preference_change_blocks_already_queued_alert(monkeypatch):
  c=db(); c.execute('INSERT INTO users(id) VALUES(1)'); ensure_user(c,1)
  monkeypatch.setenv('PUBLIC_ALERTS_ENABLED','true'); monkeypatch.delenv('ADMIN_CHAT_ID',raising=False)
  set_all(c,1,False); toggle(c,1,'flap')
- record(c,chain='bnb',launchpad='flap',address='FLAP1',name='F',symbol='F',creator='C',now=1000)
+ record(c,chain='bnb',launchpad='flap',address='FLAP1',name='F',symbol='F',creator='C',now=1000,metadata={'verified':True,'token_tax_bps':300,'holder_rewards':True})
  filter_process(c,0,now=1001); process(c,now=1002)
  assert c.execute("SELECT state FROM global_outbox").fetchone()[0]=='pending'
  set_all(c,1,False); toggle(c,1,'pumpfun')

@@ -28,7 +28,7 @@ def setup(c):
 
 def recipients(c):
     admin=os.environ.get('ADMIN_CHAT_ID')
-    if os.environ.get('PUBLIC_ALERTS_ENABLED')=='true':
+    if os.environ.get('BETA_TESTING_ENABLED','false')=='true' or os.environ.get('PUBLIC_ALERTS_ENABLED')=='true':
         ids=[r[0] for r in c.execute('SELECT id FROM users').fetchall()]
         if admin: ids.append(int(admin))
         return sorted(set(ids))
@@ -41,13 +41,13 @@ def process(c,now=None,limit=100):
         c.execute("""UPDATE global_outbox SET state='stale' WHERE state='pending' AND event_key IN
           (SELECT event_key FROM unified_launches WHERE launched_at>0 AND launched_at<?)""",(now-max_age,))
     rows=c.execute('''SELECT u.event_key,u.chain,u.launchpad,u.address,u.creator,u.name,u.symbol,u.pair_symbol,
-      u.source_height,u.bonding_progress,u.migrated,u.social_x_url,u.website_url,d.duplicate_count,d.unique_creators,d.creator_launches,u.launched_at
+      u.source_height,u.bonding_progress,u.migrated,u.social_x_url,u.website_url,d.duplicate_count,d.unique_creators,d.creator_launches,u.launched_at,u.metadata
       FROM unified_launches u JOIN global_filter_decisions d ON d.event_key=u.event_key
       LEFT JOIN alert_route_state r ON r.event_key=u.event_key
       WHERE d.allow=1 AND r.event_key IS NULL ORDER BY u.first_seen,u.id LIMIT ?''',(int(limit),)).fetchall()
     queued=0
     for x in rows:
-        row=x[:13]; decision={'duplicates':x[13],'unique_creators':x[14],'creator_launches':x[15]}
+        row=x[:13]+(x[17],); decision={'duplicates':x[13],'unique_creators':x[14],'creator_launches':x[15]}
         launched_at=int(x[16] or 0)
         max_age=int(os.environ.get('MAX_LAUNCH_AGE_SECONDS','600'))
         if launched_at and (launched_at < now-max_age or launched_at > now+120):

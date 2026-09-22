@@ -218,3 +218,7 @@ Use dedicated `SOLANA_RPC_URL` and `PONS_RPC_URL` endpoints for production relia
 
 ## STOnK metadata-required alert gate
 STOnK launch mints are retained immediately, but a launch is not admitted to the unified alert pipeline until the token detail response contains a real name and symbol. Failed metadata reads remain in the existing retry/review flow. The global router also refuses unresolved STOnK records, and legacy pending STOnK outbox rows with missing/placeholder metadata are marked `metadata_blocked` before Telegram delivery.
+
+
+## Open beta mode
+Set `BETA_TESTING_ENABLED=true` to open unlimited beta alert routing to registered bot users. In beta mode `/status`, `/plans`, and `/price` are hidden from non-admin users, trial limits are not used for alert routing, and the Start Free Trial keyboard is removed. The configured `ADMIN_CHAT_ID` retains `/status` for diagnostics. `/alerts` remains available so each tester controls launchpad preferences. Keep `GLOBAL_FILTER_ENABLED=true`.

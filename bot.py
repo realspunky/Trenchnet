@@ -22,7 +22,7 @@ def qualifies(token):
     return (token.get('verified') is True
             and token.get('launchpad') in {'pons', 'flap', 'stonk'}
             and token.get('chain') in {'solana', 'bnb', 'robinhood'}
-            and token.get('total_tax_bps') in {100, 200, 300}
+            and (token.get("token_tax_bps") if token.get("token_tax_bps") is not None else token.get("total_tax_bps")) in {100, 200, 300}
             and token.get('holder_rewards') is True)
 
 def advance_due(token, threshold):
@@ -39,6 +39,11 @@ def reply(c, user_id, text):
     parts = text.split()
     cmd = parts[0].split('@')[0] if parts else ''
     if cmd in {'/start', '/help'}:
+        if os.environ.get('BETA_TESTING_ENABLED','false') == 'true':
+            return ('Welcome to TrenchNet Beta. Live filtered launch alerts are enabled for beta testers.\n'
+                    '/alerts — choose which launchpads can send you alerts\n'
+                    '/threshold 80 — set bonding threshold (80–95)\n'
+                    '/delete_me — remove saved settings')
         return ('Welcome to TrenchNet. Currently in development; live alerts and payments are disabled.\n'
                 '/trial — start a 5-day trial (one alert per day)\n'
                 '/threshold 80 — set bonding threshold (80–95)\n'
@@ -48,6 +53,8 @@ def reply(c, user_id, text):
     if cmd == '/myid':
         return f'Your Telegram user ID: {user_id}'
     if cmd == '/trial':
+        if os.environ.get('BETA_TESTING_ENABLED','false') == 'true':
+            return 'Beta access is currently open. No trial limit is applied.'
         if os.environ.get('TRIALS_ENABLED') != 'true':
             return 'Trials will open when live monitoring is ready. Your five days have not started.'
         return ('Your five-day trial has started: up to one qualifying alert per 24-hour trial day.'
@@ -61,6 +68,8 @@ def reply(c, user_id, text):
     if cmd == '/alerts':
         return alert_summary(c,user_id) + '\nUse the buttons below to turn each launchpad on or off.'
     if cmd == '/status':
+        if os.environ.get('BETA_TESTING_ENABLED','false') == 'true' and str(user_id) != os.environ.get('ADMIN_CHAT_ID'):
+            return 'Use /help to see available commands.'
         threshold = c.execute('SELECT threshold FROM users WHERE id=?', (user_id,)).fetchone()[0]
         kind, expiry = state(c, user_id)
         expiry_text = time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(expiry)) if expiry else 'none'
@@ -141,7 +150,9 @@ def reply(c, user_id, text):
                     monitoring += f'\n{label} scanner has not reported yet'
 
         return f'Bonding threshold: {threshold}%\nAccess: {kind}\nExpiry: {expiry_text}\n{monitoring}'
-    if cmd == '/plans':
+    if cmd in {'/plans','/price'}:
+        if os.environ.get('BETA_TESTING_ENABLED','false') == 'true':
+            return 'Use /help to see available commands.'
         return ('Planned prices: $5 monthly / $60 for 12 months / $100 lifetime. '
                 'Free trial: five days, up to one qualifying alert per day; no automatic charge. Checkout is disabled. Telegram requires Stars for digital subscriptions sold inside bots. '
                 'Payment design and Stars pricing are not finalized. Do not send funds.')
@@ -179,7 +190,7 @@ def main():
                 msg = update.get('message', {})
                 if msg.get('chat', {}).get('type') == 'private' and 'text' in msg:
                     uid=msg['from']['id']; result=reply(c,uid,msg['text'])
-                    markup = alert_keyboard(c,uid) if msg['text'].split()[0].split('@')[0]=='/alerts' else {'keyboard': [[{'text': 'Start Free Trial'}]], 'resize_keyboard': True}
+                    markup = alert_keyboard(c,uid) if msg['text'].split()[0].split('@')[0]=='/alerts' else ({'remove_keyboard': True} if os.environ.get('BETA_TESTING_ENABLED','false')=='true' else {'keyboard': [[{'text': 'Start Free Trial'}]], 'resize_keyboard': True})
                     api(token, 'sendMessage', {'chat_id': msg['chat']['id'], 'text': result, 'reply_markup': markup})
                 cq=update.get('callback_query')
                 if cq and cq.get('data','').startswith('alerts:'):
