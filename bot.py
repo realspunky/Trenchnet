@@ -201,11 +201,12 @@ def sync_command_menu(token):
     """Replace Telegram's cached slash-command menu."""
     commands = _public_commands()
     api(token, 'setMyCommands', {'commands': commands, 'scope': {'type':'default'}})
+    # Clear any older per-chat command scope. A chat-specific scope overrides the
+    # default menu, which previously caused /status to reappear for the admin.
     admin = os.environ.get('ADMIN_CHAT_ID')
-    if os.environ.get('BETA_TESTING_ENABLED','false').lower() == 'true' and admin:
+    if admin:
         try:
-            api(token, 'setMyCommands', {
-                'commands': commands + [{'command':'status','description':'Scanner diagnostics'}],
+            api(token, 'deleteMyCommands', {
                 'scope': {'type':'chat','chat_id': int(admin)}
             })
         except (ValueError, TypeError):
