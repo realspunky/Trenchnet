@@ -215,3 +215,6 @@ Use dedicated `SOLANA_RPC_URL` and `PONS_RPC_URL` endpoints for production relia
 - EmberCurve response cap is configurable with `EMBER_MAX_RESPONSE_BYTES` (default 25,000,000) so the live market feed is not rejected at the former 5 MB limit.
 - PONS detects inherited cursor lag and skips historical replay beyond `PONS_MAX_CURSOR_LAG_BLOCKS` (default 200), while preserving a recent lookback for live launches. Existing historical filtered rows stay filtered.
 - STOnK registers genuinely fresh launch mints in unified intake before optional token-detail enrichment, so temporary token-detail read failures cannot suppress the launch itself.
+
+## STOnK metadata-required alert gate
+STOnK launch mints are retained immediately, but a launch is not admitted to the unified alert pipeline until the token detail response contains a real name and symbol. Failed metadata reads remain in the existing retry/review flow. The global router also refuses unresolved STOnK records, and legacy pending STOnK outbox rows with missing/placeholder metadata are marked `metadata_blocked` before Telegram delivery.

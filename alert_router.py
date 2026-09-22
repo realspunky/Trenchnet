@@ -56,6 +56,13 @@ def process(c,now=None,limit=100):
                 c.execute('INSERT OR IGNORE INTO alert_route_state VALUES(?,?)',(x[0],now))
             continue
         event_key,_,pad,*_=row
+        # STOnK alerts require resolved metadata. Leave the event unrouted so a
+        # later metadata enrichment can make it eligible; never construct an
+        # alert whose token name is missing/placeholder text.
+        token_name=(row[5] or '').strip()
+        token_symbol=(row[6] or '').strip()
+        if pad=='stonk' and (not token_name or token_name.casefold() in {'unknown','unknown token'} or not token_symbol):
+            continue
         body=alert_body(row,decision)
         with c:
             for uid in recipients(c):
@@ -73,6 +80,12 @@ def enforce_preferences(c):
     alerts that were queued before the user changed preferences.
     """
     setup(c)
+    # First cancel any legacy STOnK alert that was queued before metadata was
+    # resolved. This prevents an old "Unknown token" body from leaking out after upgrade.
+    with c:
+        c.execute("""UPDATE global_outbox SET state='metadata_blocked' WHERE state='pending' AND event_key IN
+          (SELECT event_key FROM unified_launches WHERE launchpad='stonk' AND
+           (name IS NULL OR TRIM(name)='' OR LOWER(TRIM(name)) IN ('unknown','unknown token') OR symbol IS NULL OR TRIM(symbol)=''))""")
     rows=c.execute("""SELECT o.id,o.recipient,u.launchpad
       FROM global_outbox o JOIN unified_launches u ON u.event_key=o.event_key
       WHERE o.state='pending'""").fetchall()

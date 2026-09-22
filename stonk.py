@@ -72,7 +72,11 @@ def normalize(data, expected):
               and type(rate) is int and rate in {100,200,300})
     quote=t.get('quote') or {}
     if eligible and not MINT.fullmatch(str(quote.get('mint',''))):raise FeedError('Missing reward asset')
-    return dict(mint=expected,name=clean(t.get('name','Unknown')),symbol=clean(t.get('symbol',''),30),
+    name=clean(t.get('name',''))
+    symbol=clean(t.get('symbol',''),30)
+    if not name or name.casefold() in {'unknown','unknown token'}:raise FeedError('Token metadata name unavailable')
+    if not symbol:raise FeedError('Token metadata symbol unavailable')
+    return dict(mint=expected,name=name,symbol=symbol,
         eligible=eligible,rate=rate,progress=progress*100,status=status,
         reward_mint=quote.get('mint'),reward_symbol=clean(quote.get('symbol',''),30))
 
@@ -131,13 +135,9 @@ class Scanner:
         rows=fresh_rows+maintenance
         failures=0
         for mint,created,attempts in rows:
-            # A fresh launch must not disappear just because the token-detail endpoint is
-            # temporarily unhealthy. Register its mint immediately; richer metadata can
-            # update the same unified row when /tokens/<mint> recovers.
-            is_fresh = 0 <= now-created <= 600
-            if is_fresh:
-                record_launch(self.c,chain='solana',launchpad='stonk',address=mint,name='Unknown token',symbol='',
-                    launched_at=int(created),source_table='stonk_tokens',metadata={'mint':mint,'created':created,'metadata_pending':True})
+            # Keep the mint locally immediately, but do NOT enter the unified alert
+            # pipeline until verified token metadata is available. TrenchNet must never
+            # send a STOnK launch alert named "Unknown token".
             try:
                 data,generated=self.get('/tokens/'+mint)
                 s=normalize(data,mint)
@@ -161,7 +161,8 @@ class Scanner:
                 with self.c:self.c.execute('UPDATE stonk_tokens SET status=?,attempts=?,next_check=? WHERE mint=?',
                     ('review' if attempts>=4 else 'retry',attempts+1,time.time()+min(600,60*2**attempts),mint))
                 print('Stonk token read failed: '+mint+' ('+type(e).__name__+')',flush=True)
-        self.health(f'Stonk API polling; {len(records)} launch records checked; fresh_pending={len(fresh_rows)}; serviced={len(rows)}; {failures} token read failures this cycle')
+        unresolved=self.c.execute("SELECT COUNT(*) FROM stonk_tokens WHERE status IN ('pending','retry','review')").fetchone()[0]
+        self.health(f'Stonk API polling; {len(records)} launch records checked; fresh_pending={len(fresh_rows)}; serviced={len(rows)}; {failures} token read failures this cycle; metadata_waiting={unresolved}')
 
 def run():
     if os.environ.get('STONK_ENABLED')!='true':return
