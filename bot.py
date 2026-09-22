@@ -176,11 +176,47 @@ def api(token, method, payload):
         raise RuntimeError('Telegram rejected request')
     return result['result']
 
+
+def _public_commands():
+    """Commands visible in Telegram's slash-command dashboard/menu."""
+    if os.environ.get('BETA_TESTING_ENABLED','false').lower() == 'true':
+        return [
+            {'command':'start','description':'Open TrenchNet'},
+            {'command':'alerts','description':'Choose launchpad alerts'},
+            {'command':'threshold','description':'Set bonding threshold (80-95)'},
+            {'command':'help','description':'Show available commands'},
+            {'command':'delete_me','description':'Remove saved settings'},
+        ]
+    return [
+        {'command':'start','description':'Open TrenchNet'},
+        {'command':'alerts','description':'Choose launchpad alerts'},
+        {'command':'threshold','description':'Set bonding threshold (80-95)'},
+        {'command':'help','description':'Show available commands'},
+        {'command':'status','description':'View settings'},
+        {'command':'plans','description':'Planned pricing'},
+        {'command':'delete_me','description':'Remove saved settings'},
+    ]
+
+def sync_command_menu(token):
+    """Replace Telegram's cached slash-command menu."""
+    commands = _public_commands()
+    api(token, 'setMyCommands', {'commands': commands, 'scope': {'type':'default'}})
+    admin = os.environ.get('ADMIN_CHAT_ID')
+    if os.environ.get('BETA_TESTING_ENABLED','false').lower() == 'true' and admin:
+        try:
+            api(token, 'setMyCommands', {
+                'commands': commands + [{'command':'status','description':'Scanner diagnostics'}],
+                'scope': {'type':'chat','chat_id': int(admin)}
+            })
+        except (ValueError, TypeError):
+            pass
+
 def main():
     token = os.environ.get('TELEGRAM_BOT_TOKEN')
     if not token:
         raise SystemExit('Set TELEGRAM_BOT_TOKEN securely in the server environment.')
     c = database()
+    sync_command_menu(token)
     while True:
         try:
             row = c.execute("SELECT value FROM state WHERE key='offset'").fetchone()

@@ -129,10 +129,16 @@ class Scanner:
         threshold_row=self.c.execute('SELECT threshold FROM users WHERE id=?',(self.recipient,)).fetchone()
         threshold=threshold_row[0] if threshold_row else 80
         # Prioritize genuinely new launches so historical tracking/retry rows cannot starve alerts.
-        fresh_rows=self.c.execute("SELECT mint,created,attempts FROM stonk_tokens WHERE status='pending' AND next_check<=? ORDER BY created DESC LIMIT 24",(now,)).fetchall()
-        remaining=max(0,24-len(fresh_rows))
-        maintenance=self.c.execute("SELECT mint,created,attempts FROM stonk_tokens WHERE status IN ('tracking','retry') AND next_check<=? ORDER BY next_check LIMIT ?",(now,remaining)).fetchall() if remaining else []
-        rows=fresh_rows+maintenance
+        fresh_limit=max(8,int(os.environ.get('STONK_FRESH_BATCH','40')))
+        maintenance_limit=max(0,int(os.environ.get('STONK_MAINTENANCE_BATCH','4')))
+        fresh_rows=self.c.execute("SELECT mint,created,attempts FROM stonk_tokens WHERE status='pending' AND next_check<=? ORDER BY created DESC LIMIT ?",(now,fresh_limit)).fetchall()
+        # Fresh metadata retries get their own priority lane. Old tracking/retry work
+        # cannot consume the capacity reserved for newly detected launches.
+        fresh_retry=self.c.execute("SELECT mint,created,attempts FROM stonk_tokens WHERE status='retry' AND created>=? AND next_check<=? ORDER BY created DESC LIMIT ?",(now-600,now,fresh_limit)).fetchall()
+        selected={r[0] for r in fresh_rows+fresh_retry}
+        maintenance=self.c.execute("SELECT mint,created,attempts FROM stonk_tokens WHERE status IN ('tracking','retry') AND next_check<=? ORDER BY next_check LIMIT ?",(now,maintenance_limit)).fetchall() if maintenance_limit else []
+        maintenance=[r for r in maintenance if r[0] not in selected]
+        rows=fresh_rows+fresh_retry+maintenance
         failures=0
         for mint,created,attempts in rows:
             # Keep the mint locally immediately, but do NOT enter the unified alert
@@ -163,7 +169,8 @@ class Scanner:
             except Exception as e:
                 failures+=1
                 with self.c:self.c.execute('UPDATE stonk_tokens SET status=?,attempts=?,next_check=? WHERE mint=?',
-                    ('review' if attempts>=4 else 'retry',attempts+1,time.time()+min(600,60*2**attempts),mint))
+                    ('review' if attempts>=8 else 'retry',attempts+1,
+                     time.time()+(min(30,3*(2**min(attempts,3))) if time.time()-created<=600 else min(600,60*2**min(attempts,4))),mint))
                 print('Stonk token read failed: '+mint+' ('+type(e).__name__+')',flush=True)
         unresolved=self.c.execute("SELECT COUNT(*) FROM stonk_tokens WHERE status IN ('pending','retry','review')").fetchone()[0]
         self.health(f'Stonk API polling; {len(records)} launch records checked; fresh_pending={len(fresh_rows)}; serviced={len(rows)}; {failures} token read failures this cycle; metadata_waiting={unresolved}')
@@ -177,7 +184,7 @@ def run():
     c=database();setup(c);scanner=Scanner(c,recipient)
     print('Stonk private scanner started.',flush=True)
     while True:
-        delay=60
+        delay=max(3,int(os.environ.get('STONK_POLL_SECONDS','8')))
         try:
             scanner.scan()
             if os.environ.get('GLOBAL_FILTER_ENABLED','true')!='true':
