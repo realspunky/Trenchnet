@@ -71,33 +71,50 @@ def process(c, recipient, now=None, limit=100, duplicate_window=None, creator_wi
     duplicate_window=int(os.environ.get('DUPLICATE_WINDOW_SECONDS','900') if duplicate_window is None else duplicate_window)
     creator_window=int(os.environ.get('CREATOR_WINDOW_SECONDS','1800') if creator_window is None else creator_window)
     creator_limit=int(os.environ.get('CREATOR_LAUNCH_LIMIT','3') if creator_limit is None else creator_limit)
-    rows=c.execute('''SELECT event_key,chain,launchpad,address,creator,name,symbol,pair_symbol,source_height,
-      bonding_progress,migrated,launched_at FROM unified_launches WHERE pipeline_state='intake'
-      ORDER BY launched_at,id LIMIT ?''',(int(limit),)).fetchall()
+    batch=int(os.environ.get('GLOBAL_FILTER_BATCH_SIZE','1000') if limit==100 else limit)
+    pads=('flap','stonk','pons','embercurve','pumpfun')
+    select_cols="event_key,chain,launchpad,address,creator,name,symbol,pair_symbol,source_height,bonding_progress,migrated,launched_at"
+    total_intake=c.execute("SELECT COUNT(*) FROM unified_launches WHERE pipeline_state='intake'").fetchone()[0]
+    if total_intake<=batch:
+        # Preserve strict arrival order when the queue is small; duplicate/creator rules are order-sensitive.
+        rows=c.execute(f"SELECT {select_cols} FROM unified_launches WHERE pipeline_state='intake' ORDER BY launched_at,id LIMIT ?",(batch,)).fetchall()
+    else:
+        # Under backlog pressure reserve capacity for every launchpad, then process the selected
+        # rows in original arrival order. This prevents one noisy scanner starving the others.
+        per_pad=max(20,batch//len(pads)); ids=[]
+        for pad in pads:
+            ids += [r[0] for r in c.execute("SELECT id FROM unified_launches WHERE pipeline_state='intake' AND launchpad=? ORDER BY launched_at DESC,id DESC LIMIT ?",(pad,per_pad)).fetchall()]
+        ids=ids[:batch]
+        if ids:
+            marks=','.join('?' for _ in ids)
+            rows=c.execute(f"SELECT {select_cols} FROM unified_launches WHERE id IN ({marks}) ORDER BY launched_at,id",ids).fetchall()
+        else: rows=[]
     allowed=blocked=0
     for row in rows:
         event_key,chain,launchpad,address,creator,name,symbol,*_=row
-        launched_at=int(row[-1] or 0)
-        max_age=int(os.environ.get('MAX_LAUNCH_AGE_SECONDS','600'))
-        # Never replay historical listings as NEW LAUNCH alerts after a redeploy.
+        launched_at=int(row[-1] or 0); max_age=int(os.environ.get('MAX_LAUNCH_AGE_SECONDS','600'))
         if launched_at and (launched_at < now-max_age or launched_at > now+120):
             decision={'allow':False,'reason':'stale_launch','duplicates':1,'unique_creators':1,'creator_launches':1}
         else:
-            decision=assess(c,chain=chain,launchpad=launchpad,address=address,creator=creator,name=name,symbol=symbol,
-                now=now,duplicate_window=duplicate_window,creator_window=creator_window,creator_limit=creator_limit)
+            decision=assess(c,chain=chain,launchpad=launchpad,address=address,creator=creator,name=name,symbol=symbol,now=now,duplicate_window=duplicate_window,creator_window=creator_window,creator_limit=creator_limit)
         with c:
-            c.execute('''INSERT OR REPLACE INTO global_filter_decisions
-              (event_key,decided_at,allow,reason,duplicate_count,unique_creators,creator_launches)
-              VALUES(?,?,?,?,?,?,?)''',(event_key,now,int(decision['allow']),decision['reason'],decision['duplicates'],decision['unique_creators'],decision['creator_launches']))
-            if decision['allow']:
-                allowed+=1
+            c.execute('INSERT OR REPLACE INTO global_filter_decisions (event_key,decided_at,allow,reason,duplicate_count,unique_creators,creator_launches) VALUES(?,?,?,?,?,?,?)',(event_key,now,int(decision['allow']),decision['reason'],decision['duplicates'],decision['unique_creators'],decision['creator_launches']))
+            if decision['allow']: allowed+=1
             else: blocked+=1
-            c.execute("UPDATE unified_launches SET pipeline_state=? WHERE event_key=?",
-                      ('approved' if decision['allow'] else 'filtered',event_key))
-    with c:c.execute('INSERT OR REPLACE INTO global_filter_health VALUES(1,?,?)',
-        (now,f'Global filter: {len(rows)} processed; {allowed} approved; {blocked} filtered'))
+            c.execute("UPDATE unified_launches SET pipeline_state=? WHERE event_key=?",('approved' if decision['allow'] else 'filtered',event_key))
+    remaining=c.execute("SELECT COUNT(*) FROM unified_launches WHERE pipeline_state='intake'").fetchone()[0]
+    # Include this cycle's decision reasons and launchpads in health. This makes a
+    # zero-approved cycle diagnosable from /status instead of requiring Railway logs.
+    keys=[r[0] for r in rows]
+    reasons=[]; pads_seen=[]
+    if keys:
+        marks=','.join('?' for _ in keys)
+        reasons=c.execute(f"SELECT reason,COUNT(*) FROM global_filter_decisions WHERE event_key IN ({marks}) GROUP BY reason ORDER BY COUNT(*) DESC",keys).fetchall()
+        pads_seen=c.execute(f"SELECT launchpad,COUNT(*) FROM unified_launches WHERE event_key IN ({marks}) GROUP BY launchpad ORDER BY COUNT(*) DESC",keys).fetchall()
+    reason_text=','.join(f'{k}={v}' for k,v in reasons) or 'none'
+    pad_text=','.join(f'{k}={v}' for k,v in pads_seen) or 'none'
+    with c: c.execute('INSERT OR REPLACE INTO global_filter_health VALUES(1,?,?)',(now,f'Global filter: {len(rows)} processed; {allowed} approved; {blocked} filtered; reasons[{reason_text}]; pads[{pad_text}]; intake_remaining={remaining}'))
     return {'processed':len(rows),'allowed':allowed,'blocked':blocked}
-
 
 def run():
     if os.environ.get('GLOBAL_FILTER_ENABLED','true')!='true': return
@@ -109,7 +126,11 @@ def run():
         try:
             process(c,recipient)
         except Exception as e:
-            print('Global filter error: '+type(e).__name__+': '+str(e),flush=True)
+            msg='Global filter error: '+type(e).__name__+': '+str(e)[:180]
+            try:
+                with c:c.execute('INSERT OR REPLACE INTO global_filter_health VALUES(1,?,?)',(int(time.time()),msg))
+            except Exception: pass
+            print(msg,flush=True)
         time.sleep(float(os.environ.get('GLOBAL_FILTER_POLL_SECONDS','3')))
 
 if __name__=='__main__': run()

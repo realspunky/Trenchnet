@@ -5,6 +5,7 @@ import os
 import sqlite3
 import time
 import unicodedata
+from urllib.error import HTTPError
 from flap import Reader, PORTAL
 from rpc_check import call
 from launch_model import setup as unified_setup, record as record_launch
@@ -213,9 +214,13 @@ def run():
             if os.environ.get('GLOBAL_FILTER_ENABLED','true')!='true':
                 deliver(c,token,api)
         except Exception as e:
-            # Type is useful without risking API key disclosure in exception text.
-            print('Scanner paused/retrying: '+type(e).__name__,flush=True)
-            with c:c.execute('INSERT OR REPLACE INTO scanner_health VALUES(1,?,?)',(int(time.time()),'Scanner error; retrying'))
+            # Report a safe diagnostic without ever printing the configured RPC URL/API key.
+            detail=str(e or '').replace(url,'[RPC]')[:140]
+            if isinstance(e, HTTPError): detail='HTTP '+str(e.code)
+            elif not detail: detail=type(e).__name__
+            safe=type(e).__name__+': '+detail
+            print('Scanner paused/retrying: '+safe,flush=True)
+            with c:c.execute('INSERT OR REPLACE INTO scanner_health VALUES(1,?,?)',(int(time.time()),'Scanner error: '+safe+'; retrying'))
         time.sleep(15)
 
 if __name__=='__main__':run()

@@ -129,8 +129,8 @@ class Scanner:
   with self.c:self.c.execute('INSERT OR REPLACE INTO pumpfun_health VALUES(1,?,?)',(int(time.time()),msg))
  def scan(self):
   now=int(time.time())
-  page_size=max(100,min(1000,int(os.environ.get('PUMPFUN_SIGNATURE_LIMIT','1000'))))
-  max_pages=max(1,min(25,int(os.environ.get('PUMPFUN_MAX_PAGES','10'))))
+  page_size=max(50,min(500,int(os.environ.get('PUMPFUN_SIGNATURE_LIMIT','200'))))
+  max_pages=max(1,min(10,int(os.environ.get('PUMPFUN_MAX_PAGES','3'))))
   initialized=self.c.execute("SELECT value FROM pumpfun_state WHERE key='initialized'").fetchone()
   known=self.c.execute("SELECT value FROM pumpfun_state WHERE key='last_signature'").fetchone()
   last=known[0] if known else None
@@ -141,6 +141,9 @@ class Scanner:
   while pages < max_pages:
    opts={'limit':page_size,'commitment':'confirmed'}
    if before: opts['before']=before
+   # The RPC supports an `until` cursor. Asking only for signatures newer than our
+   # saved head avoids walking historical Pump traffic and dramatically reduces RPC load.
+   if last: opts['until']=last
    sigs=self.call('getSignaturesForAddress',[PROGRAM,opts]) or []
    pages+=1
    if not sigs: break
@@ -155,6 +158,9 @@ class Scanner:
   queued=0; creations_seen=0
   if initialized:
    for item in reversed(fresh):
+    # Pace transaction lookups. Pump program traffic is high and a burst of
+    # getTransaction calls is the main source of provider HTTP 429 responses.
+    time.sleep(float(os.environ.get('PUMPFUN_TX_DELAY_SECONDS','0.20')))
     tx=self.call('getTransaction',[item['signature'],{'encoding':'jsonParsed','commitment':'confirmed','maxSupportedTransactionVersion':1}])
     if not tx:continue
     for t in creations(tx):
