@@ -105,7 +105,7 @@ class Scanner:
             for t in markets:
                 old=self.c.execute('SELECT graduated FROM ember_tokens WHERE mint=?',(t['mint'],)).fetchone()
                 existing_unified=self.c.execute("SELECT 1 FROM unified_launches WHERE launchpad='embercurve' AND address=?",(t['mint'],)).fetchone()
-                v2_crossed=(os.environ.get('TRENCHNET_V2_ENABLED','false')!='true' or (isinstance(t.get('progress'),(int,float)) and t['progress']>=90) or t['graduated'])
+                v2_crossed=(os.environ.get('TRENCHNET_V2_ENABLED','false')!='true' or (isinstance(t.get('progress'),(int,float)) and t['progress']>=60) or t['graduated'])
                 if initialized and v2_crossed:
                     record_launch(self.c,chain='solana',launchpad='embercurve',address=t['mint'],creator=t['creator'],
                       name=t['name'],symbol=t['symbol'],pair_symbol=t['pair_symbol'],launched_at=now,bonding_progress=t['progress'],

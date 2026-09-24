@@ -22,7 +22,7 @@ def test_v2_status_is_not_v1_status(monkeypatch):
     c=db(); monkeypatch.setenv('TRENCHNET_V2_ENABLED','true'); monkeypatch.setenv('ADMIN_CHAT_ID','1')
     out=bot.reply(c,1,'/status')
     assert 'TRENCHNET V2 — PRIVATE TEST' in out
-    assert 'Bonding gate: ≥90% mandatory' in out
+    assert 'Bonding gate: ≥60% mandatory' in out
     assert 'PILOT DELIVERIES' not in out.upper()
     assert 'Access:' not in out and 'Expiry:' not in out
     assert 'PONS' in out and 'Awaiting intel: 1' in out

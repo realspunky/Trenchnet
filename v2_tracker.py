@@ -1,4 +1,4 @@
-"""V2 tracker: refreshes the mandatory 90% gate and Stage-2 enrichment.
+"""V2 tracker: refreshes the mandatory 60% gate and Stage-2 enrichment.
 
 Adapters are deliberately source-driven. If a launchpad does not expose a fact
 reliably, the token stays awaiting_intelligence rather than receiving a fabricated value.
@@ -56,9 +56,14 @@ def promote(c,event_key,ready):
 def cycle(c,now=None,limit=None):
     setup(c);now=int(time.time() if now is None else now)
     limit=int(os.environ.get("V2_TRACK_BATCH","250") if limit is None else limit)
-    rows=c.execute("""SELECT event_key,launchpad,address,launched_at,bonding_progress,migrated,metadata
-      FROM unified_launches WHERE pipeline_state IN ('v2_tracking','awaiting_intelligence')
-      ORDER BY last_seen DESC LIMIT ?""",(limit,)).fetchall()
+    retry_delay=max(5,int(os.environ.get("V2_INTELLIGENCE_RETRY_SECONDS","20")))
+    rows=c.execute("""SELECT u.event_key,u.launchpad,u.address,u.launched_at,u.bonding_progress,u.migrated,u.metadata
+      FROM unified_launches u LEFT JOIN v2_intelligence v ON v.event_key=u.event_key
+      WHERE u.pipeline_state='v2_tracking'
+         OR (u.pipeline_state='awaiting_intelligence' AND COALESCE(v.updated_at,0)<=?)
+      ORDER BY CASE WHEN u.pipeline_state='awaiting_intelligence' THEN 0 ELSE 1 END,
+               CASE WHEN u.pipeline_state='awaiting_intelligence' THEN u.launched_at ELSE -u.last_seen END ASC
+      LIMIT ?""",(now-retry_delay,limit)).fetchall()
     ready=waiting=tracking=0
     for row in rows:
         event_key=row[0]
@@ -89,7 +94,7 @@ def run():
             r=cycle(c)
             with c:
                 c.execute("""CREATE TABLE IF NOT EXISTS v2_health(id INTEGER PRIMARY KEY CHECK(id=1),updated INTEGER,message TEXT)""")
-                c.execute("INSERT OR REPLACE INTO v2_health VALUES(1,?,?)",(int(time.time()),f"V2: {r['processed']} checked; {r['ready']} ready; {r['waiting']} awaiting intelligence; {r['tracking']} below 90%"))
+                c.execute("INSERT OR REPLACE INTO v2_health VALUES(1,?,?)",(int(time.time()),f"V2: {r['processed']} checked; {r['ready']} ready; {r['waiting']} awaiting intelligence; {r['tracking']} below 60%"))
         except Exception as e:
             print("V2 tracker error: "+type(e).__name__+": "+str(e)[:160],flush=True)
         time.sleep(float(os.environ.get("V2_TRACK_POLL_SECONDS","5")))

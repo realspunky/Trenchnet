@@ -57,7 +57,7 @@ def market_intelligence(launchpad,address):
 
     A provider is intentionally configurable because no single documented first-party
     endpoint exposes holders + unique traders + sniper labels for every launchpad.
-    It is called only after >=90%, preserving API budget.
+    It is called only after >=60%, preserving API budget.
     """
     tpl=os.environ.get('V2_MARKET_INTELLIGENCE_URL','').strip()
     if not tpl:return {}

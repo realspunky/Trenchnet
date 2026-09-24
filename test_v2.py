@@ -13,10 +13,10 @@ def full():
       "trades":{"buys":50,"sells":20,"uniqueBuyers":40,"uniqueSellers":18,
                 "buyVolume":8000,"sellVolume":3000,"volume":11000,"windowSeconds":3600}}
 
-def test_90_is_absolute():
-    assert bonding_gate(89.999,False) is None
-    assert bonding_gate(90,False)==90
-    assert bonding_gate(.90,False)==90
+def test_60_is_absolute():
+    assert bonding_gate(59.999,False) is None
+    assert bonding_gate(60,False)==60
+    assert bonding_gate(.60,False)==60
 
 def test_incomplete_stage2_never_ready():
     c=db(); e="solana:stonk:x:launch"

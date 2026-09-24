@@ -26,5 +26,5 @@ def fetch(launchpad,address,metadata=None):
  else:p=meta.get('bondingProgress')
  if p is None:return None
  p=float(p)
- if p < 90:return p,meta
+ if p < 60:return p,meta
  return p,enrich(launchpad,address,meta)

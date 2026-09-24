@@ -42,11 +42,11 @@ def reply(c, user_id, text):
         if os.environ.get('BETA_TESTING_ENABLED','false') == 'true':
             return ('Welcome to TrenchNet Beta. Live filtered launch alerts are enabled for beta testers.\n'
                     '/alerts — choose which launchpads can send you alerts\n'
-                    '/threshold 80 — set bonding threshold (80–95)\n'
+
                     '/delete_me — remove saved settings')
         return ('Welcome to TrenchNet. Currently in development; live alerts and payments are disabled.\n'
                 '/trial — start a 5-day trial (one alert per day)\n'
-                '/threshold 80 — set bonding threshold (80–95)\n'
+
                 '/alerts — choose launchpads for alerts\n'
                 '/status — view settings\n/plans — planned pricing\n'
                 '/email — email availability\n/delete_me — remove saved settings')
@@ -59,12 +59,6 @@ def reply(c, user_id, text):
             return 'Trials will open when live monitoring is ready. Your five days have not started.'
         return ('Your five-day trial has started: up to one qualifying alert per 24-hour trial day.'
                 if start_trial(c, user_id) else 'This account has already used or started its trial. Use /status or /plans.')
-    if cmd == '/threshold':
-        if len(parts) != 2 or not parts[1].isdigit() or not 80 <= int(parts[1]) <= 95:
-            return 'Choose a whole number from 80 to 95. Example: /threshold 85'
-        c.execute('UPDATE users SET threshold=? WHERE id=?', (int(parts[1]), user_id))
-        c.commit()
-        return f'Bonding threshold saved: {parts[1]}%. Live alerts are not active yet.'
     if cmd == '/alerts':
         return alert_summary(c,user_id) + '\nUse the buttons below to turn each launchpad on or off.'
     if cmd == '/status':
@@ -78,7 +72,6 @@ def reply(c, user_id, text):
                 return 'Use /help to see available commands.'
             from v2_status import build as build_v2_status
             return build_v2_status(c)
-        threshold = c.execute('SELECT threshold FROM users WHERE id=?', (user_id,)).fetchone()[0]
         kind, expiry = state(c, user_id)
         expiry_text = time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(expiry)) if expiry else 'none'
         monitoring = 'Public alerts disabled'
@@ -170,7 +163,7 @@ def reply(c, user_id, text):
                 elif os.environ.get(enabled)=='true':
                     monitoring += f'\n{label} scanner has not reported yet'
 
-        return f'Bonding threshold: {threshold}%\nAccess: {kind}\nExpiry: {expiry_text}\n{monitoring}'
+        return f'Bonding filter: fixed at 60%\nAccess: {kind}\nExpiry: {expiry_text}\n{monitoring}'
     if cmd in {'/plans','/price'}:
         if os.environ.get('BETA_TESTING_ENABLED','false') == 'true':
             return 'Use /help to see available commands.'
@@ -204,14 +197,12 @@ def _public_commands():
         return [
             {'command':'start','description':'Open TrenchNet'},
             {'command':'alerts','description':'Choose launchpad alerts'},
-            {'command':'threshold','description':'Set bonding threshold (80-95)'},
             {'command':'help','description':'Show available commands'},
             {'command':'delete_me','description':'Remove saved settings'},
         ]
     return [
         {'command':'start','description':'Open TrenchNet'},
         {'command':'alerts','description':'Choose launchpad alerts'},
-        {'command':'threshold','description':'Set bonding threshold (80-95)'},
         {'command':'help','description':'Show available commands'},
         {'command':'status','description':'View settings'},
         {'command':'plans','description':'Planned pricing'},

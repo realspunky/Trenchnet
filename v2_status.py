@@ -50,7 +50,7 @@ def build(c):
     public='🟢 ON' if os.environ.get('PUBLIC_ALERTS_ENABLED','false').lower()=='true' else '🔴 OFF'
     scope=f'last {ACTIVE_SECONDS//60}m'
     if session and session>window_cutoff: scope+=f' · session {max(0,now-session)//60}m old'
-    lines=['TRENCHNET V2 — PRIVATE TEST','',f'Engine: {engine}',f'Public delivery: {public}','Bonding gate: ≥90% mandatory',f'Active window: {scope}','']
+    lines=['TRENCHNET V2 — PRIVATE TEST','',f'Engine: {engine}',f'Public delivery: {public}','Bonding gate: ≥60% mandatory',f'Active window: {scope}','']
 
     total_tracking=total_wait=total_ready=0
     health_tables={'flap':'scanner_health','stonk':'stonk_health','pons':'pons_health','embercurve':'ember_health','pumpfun':'pumpfun_health'}
@@ -64,17 +64,17 @@ def build(c):
         errors=_one(c,"SELECT COUNT(*) FROM v2_intelligence WHERE launchpad=? AND crossed_90_at>=? AND last_error<>''",(pad,cutoff))
         total_tracking+=tracking; total_wait+=waiting; total_ready+=ready
         g,y=health_limits[pad]
-        lines += [f'{label.upper()}  {_health(c,health_tables[pad],g,y)}',f'Tracking <90%: {tracking} · Crossed 90%: {crossed}',f'Awaiting intel: {waiting} · Ready: {ready} · Errors: {errors}','']
+        lines += [f'{label.upper()}  {_health(c,health_tables[pad],g,y)}',f'Tracking <60%: {tracking} · Crossed 60%: {crossed}',f'Awaiting intel: {waiting} · Ready: {ready} · Errors: {errors}','']
 
     missing=_missing(c,cutoff)
-    lines += ['STAGE 2',f'Below 90% / tracking: {total_tracking}',f'Awaiting intelligence: {total_wait}',f'Ready: {total_ready}']
+    lines += ['STAGE 2',f'Below 60% / tracking: {total_tracking}',f'Awaiting intelligence: {total_wait}',f'Ready: {total_ready}']
     if missing:
         pretty={'description':'description','social_checked':'social check','holder_count':'holders','top10_holder_pct':'top 10','sniper_count':'sniper count','sniper_concentration_pct':'sniper concentration','buy_count':'buys','sell_count':'sells','unique_buyers':'unique buyers','unique_sellers':'unique sellers','volume':'volume'}
         lines.append('Missing: '+', '.join(f'{pretty[k]}={v}' for k,v in missing.items()))
     else:lines.append('Missing: none in active awaiting set')
 
     # A historical V1/global_outbox row can never appear here unless its token crossed
-    # the V2 90% gate during this session/window. This fixes misleading lifetime Sent totals.
+    # the V2 60% gate during this session/window. This fixes misleading lifetime Sent totals.
     try:
         states=c.execute("""SELECT o.state,COUNT(*) FROM global_outbox o
           JOIN v2_intelligence v ON v.event_key=o.event_key

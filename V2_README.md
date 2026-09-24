@@ -1,7 +1,7 @@
 # TrenchNet V2
 
 ## Mandatory rule
-When `TRENCHNET_V2_ENABLED=true`, no token can be approved before verified bonding progress is at least 90%.
+When `TRENCHNET_V2_ENABLED=true`, no token can be approved before verified bonding progress is at least 60%.
 Stage-2 intelligence is fail-closed: missing required data means no alert.
 
 Required Stage-2 fields:
@@ -13,11 +13,11 @@ Required Stage-2 fields:
 - volume
 
 Additional fields shown when supplied: dev holding %, largest sniper %, snipers holding/sold,
-bundled/linked wallet count, buy/sell volume, activity window, launch-to-90 time.
+bundled/linked wallet count, buy/sell volume, activity window, launch-to-60 time.
 
 ## Source integrity
 TrenchNet does not invent missing values. Flap, STOnK and Ember use their scanner-supplied bonding progress.
-PONS and Pump.fun creation events are stored as silent `v2_tracking`; creation alone is not treated as 90%.
+PONS and Pump.fun creation events are stored as silent `v2_tracking`; creation alone is not treated as 60%.
 A verified JSON adapter can be configured for any launchpad using:
 `V2_<LAUNCHPAD>_INTELLIGENCE_URL=https://provider/token/{address}`.
 The adapter must explicitly provide bonding progress and Stage-2 fields.
@@ -35,27 +35,27 @@ PONS V2 now has a built-in read-only adapter using Pons Portal's public API for 
 Stage-2 trade/sniper metrics remain mandatory. If the direct source does not expose them, the token remains `awaiting_intelligence`; configure a verified intelligence URL rather than weakening the alert gate.
 
 ## Continued Stage-2 work
-- PONS V2 now uses documented live `progressPercent` for the mandatory 90% gate.
-- PONS holder analysis runs only after >=90% to preserve the documented 8 req/min holder budget.
+- PONS V2 now uses documented live `progressPercent` for the mandatory 60% gate.
+- PONS holder analysis runs only after >=60% to preserve the documented 8 req/min holder budget.
 - Complete holder pagination is required before Top-10 concentration is accepted; partial pages never become a fake total.
 - Developer holding percentage is derived from the deployer address when it appears in the complete holder set.
 - Tracker failures are isolated per token; a 429/API error cannot stop the whole V2 batch.
-- Pump.fun remains fail-closed for direct bonding progress until a verified adapter/account decoder is configured; creation is never treated as 90%.
+- Pump.fun remains fail-closed for direct bonding progress until a verified adapter/account decoder is configured; creation is never treated as 60%.
 
 ## All-platform Stage 2 (current build)
-- Flap: verified scanner bonding progress; tax/reward gate preserved; post-90 Stage-2 collector.
-- STOnK: verified API graduation progress; 1-3% reward-launch gate preserved; post-90 Stage-2 collector.
+- Flap: verified scanner bonding progress; tax/reward gate preserved; post-60 Stage-2 collector.
+- STOnK: verified API graduation progress; 1-3% reward-launch gate preserved; post-60 Stage-2 collector.
 - PONS: public API bonding progress + complete paginated holder concentration collector.
-- EmberCurve: public market-feed bonding progress; post-90 Stage-2 collector.
+- EmberCurve: public market-feed bonding progress; post-60 Stage-2 collector.
 - Pump.fun: bonding-curve PDA reader with reserve-based graduation progress; optional decoded provider fallback.
 
 ### Deep intelligence sources
-Exact holder count, unique buyer/seller counts and sniper/bundle labels are not exposed by one first-party endpoint across all five launchpads. TrenchNet therefore supports a read-only normalized Stage-2 provider through `V2_MARKET_INTELLIGENCE_URL`, called only after the mandatory 90% gate. It never fabricates missing fields. Solana top-10 concentration is collected directly from RPC; PONS holder count/concentration uses its public paginated API. Flap EVM exact holders can use `V2_EVM_HOLDERS_URL`.
+Exact holder count, unique buyer/seller counts and sniper/bundle labels are not exposed by one first-party endpoint across all five launchpads. TrenchNet therefore supports a read-only normalized Stage-2 provider through `V2_MARKET_INTELLIGENCE_URL`, called only after the mandatory 60% gate. It never fabricates missing fields. Solana top-10 concentration is collected directly from RPC; PONS holder count/concentration uses its public paginated API. Flap EVM exact holders can use `V2_EVM_HOLDERS_URL`.
 
 V2 remains fail-closed: if a mandatory Stage-2 field cannot be verified, the token remains `awaiting_intelligence` and no Telegram alert is sent.
 
 ## Binance Wallet/Web3 Stage-2 enrichment
-V2 now uses Binance's public read-only Web3 token endpoints after the launchpad-native 90% gate for:
+V2 now uses Binance's public read-only Web3 token endpoints after the launchpad-native 60% gate for:
 - Flap / BSC (`chainId=56`)
 - STOnK, EmberCurve and Pump.fun / Solana (`chainId=CT_501`)
 
@@ -98,3 +98,11 @@ Authenticated Binance Web3 remains optional enrichment only.
 - Bonding progress is still launchpad-native/on-chain and remains the mandatory first gate.
 - Unique buyer/seller counts remain a hard Stage-2 gate. If a launchpad cannot verify them, the token stays awaiting_intelligence.
 - Any missing mandatory fact keeps the token in awaiting_intelligence; no placeholder zero is inserted.
+
+### PONS Stage-2 reliability patch (2026-09-24)
+- PONS bonding progress tracking now reads `realQuoteReserve/graduationThreshold` directly from each stored V2 curve over `PONS_RPC_URL`; the rate-limited Portal API is no longer polled for every below-90 token.
+- Post-60 creator metadata is read on-chain from token `getTokenInfo()` (description + socials).
+- Post-60 CurveBuy/CurveSell logs are decoded directly from the launch curve for buys, sells, unique traders, quote volume and early-wallet/sniper metrics.
+- Successful holder pages are cached into unified metadata so retries do not repeatedly spend the Portal holder budget.
+- `awaiting_intelligence` rows are prioritized ahead of the below-90 tracking backlog and retry on a 20-second default backoff (`V2_INTELLIGENCE_RETRY_SECONDS`).
+- Valid zero metrics (for example zero sells or zero early wallets) are preserved as real data rather than incorrectly treated as missing.

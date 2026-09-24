@@ -7,9 +7,9 @@ def test_all_platform_names_supported():
  assert callable(fetch)
  for p in ('flap','stonk','pons','embercurve','pumpfun'):assert isinstance(p,str)
 
-def test_mandatory_gate_exactly_90():
- assert bonding_gate(89.99) is None
- assert bonding_gate(90)==90
+def test_mandatory_gate_exactly_60():
+ assert bonding_gate(59.99) is None
+ assert bonding_gate(60)==60
  assert bonding_gate(100)==100
 
 def test_stage2_requires_every_core_signal():

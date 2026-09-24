@@ -27,7 +27,7 @@ def fetch(launchpad,address,metadata=None):
     if launchpad == "pons":
         try:
             from pons_v2_intelligence import fetch as pons_fetch
-            return pons_fetch(address)
+            return pons_fetch(address, metadata)
         except Exception:
             pass
     if launchpad == "pumpfun":
@@ -38,7 +38,7 @@ def fetch(launchpad,address,metadata=None):
                 p,data=result
                 merged=dict(metadata or {}); merged.update(data or {})
                 from stage2_collectors import enrich
-                return (p,enrich(launchpad,address,merged)) if p>=90 else (p,merged)
+                return (p,enrich(launchpad,address,merged)) if p>=60 else (p,merged)
         except Exception:
             pass
     if launchpad in {"flap","stonk","embercurve"}:

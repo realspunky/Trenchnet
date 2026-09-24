@@ -1,7 +1,7 @@
 """Binance Web3 read-only enrichment for TrenchNet V2.
 
 Official Binance Wallet public token-info/audit endpoints are used only after the
-launchpad-native bonding gate reaches >=90%. Binance never determines bonding.
+launchpad-native bonding gate reaches >=60%. Binance never determines bonding.
 Supported here: BSC (Flap) and Solana (STOnK/EmberCurve/Pump.fun).
 PONS/Robinhood Chain remains native because Binance token-info does not list it.
 """

@@ -151,7 +151,7 @@ class Scanner:
                 # Only holder-reward launches with an allowed 1%-3% transfer tax may
                 # enter the unified alert pipeline. Metadata resolution alone is not
                 # enough to qualify a STOnK launch.
-                if s['eligible'] and (os.environ.get('TRENCHNET_V2_ENABLED','false')!='true' or s['progress']>=90 or s['status']=='graduated'):
+                if s['eligible'] and (os.environ.get('TRENCHNET_V2_ENABLED','false')!='true' or s['progress']>=60 or s['status']=='graduated'):
                     record_launch(self.c,chain='solana',launchpad='stonk',address=mint,name=s['name'],symbol=s['symbol'],
                         launched_at=int(created),bonding_progress=s['progress'],migrated=s['status']=='graduated',
                         source_table='stonk_tokens',metadata=s)
