@@ -54,6 +54,10 @@ def persist_batch(c, tokens, height, block_hash):
         for t in tokens:
             c.execute('INSERT OR IGNORE INTO scan_tokens(address,name,symbol,tx,created,height) VALUES (?,?,?,?,?,?)',
                       tuple(t[k] for k in ['address','name','symbol','tx','created','height']))
+            if os.environ.get('TRENCHNET_V2_ENABLED','true').lower()=='true':
+                record_launch(c,chain='bnb',launchpad='flap',address=t['address'],creator=t.get('creator',''),
+                              name=t['name'],symbol=t['symbol'],source_tx=t['tx'],source_height=t['height'],
+                              launched_at=t['created'],source_table='scan_tokens',metadata=t,now=int(time.time()))
         c.execute('INSERT OR REPLACE INTO scan_cursor VALUES (1,?,?)',(height,block_hash))
 
 def minimum_balance(s):
@@ -138,13 +142,14 @@ class Scanner:
                 elif s['verified']:status='tracking'
                 else:status='excluded'
                 with self.c:
-                    if s.get('verified') and s.get('status')==1 and (os.environ.get('TRENCHNET_V2_ENABLED','false')!='true' or (isinstance(s.get('bonding_percent'),(int,float)) and s.get('bonding_percent')>=60)):
+                    if os.environ.get('TRENCHNET_V2_ENABLED','true').lower()=='true' or (s.get('verified') and s.get('status')==1):
                         meta=dict(t); meta.update(s)
                         record_launch(self.c,chain='bnb',launchpad='flap',address=t['address'],creator=t.get('creator',''),
                             name=t['name'],symbol=t['symbol'],source_tx=t['tx'],source_height=s.get('block_number',t['height']),
                             launched_at=t['created'],bonding_progress=s.get('bonding_percent'),migrated=s.get('migrated',False),
                             source_table='scan_tokens',metadata=meta,now=now)
-                    queue_candidate(self.c,t,s,self.recipient,threshold,now)
+                    if os.environ.get('TRENCHNET_V2_ENABLED','true').lower()!='true':
+                        queue_candidate(self.c,t,s,self.recipient,threshold,now)
                     self.c.execute('UPDATE scan_tokens SET status=?,snapshot=?,next_check=?,attempts=0 WHERE address=?',
                           (status,json.dumps(s),now+30,t['address']))
             except Exception:
@@ -211,7 +216,7 @@ def run():
         try:
             if scanner is None:scanner=Scanner(c,url,recipient)
             scanner.scan()
-            if os.environ.get('GLOBAL_FILTER_ENABLED','true')!='true':
+            if os.environ.get('TRENCHNET_V2_ENABLED','true').lower()!='true':
                 deliver(c,token,api)
         except Exception as e:
             # Report a safe diagnostic without ever printing the configured RPC URL/API key.

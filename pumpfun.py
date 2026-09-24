@@ -173,7 +173,7 @@ class Scanner:
       with self.c:self.c.execute("UPDATE unified_launches SET pipeline_state='v2_tracking' WHERE event_key=?",(event_key,))
      with self.c:
       self.c.execute('INSERT OR IGNORE INTO pumpfun_tokens VALUES(?,?,?,?,?,?,?,?,?)',(t['mint'],t['name'],t['symbol'],t['creator'],t['uri'],item['signature'],item.get('slot',0),now,json.dumps(t)))
-      if old is None:
+      if old is None and os.environ.get('TRENCHNET_V2_ENABLED','true').lower()!='true':
        self.c.execute('INSERT OR IGNORE INTO pumpfun_outbox(recipient,event_key,body,expires) VALUES(?,?,?,?)',(self.recipient,'solana:'+t['mint']+':pumpfun:launch',body(t),now+600));queued+=1
 
   if newest:
@@ -195,7 +195,7 @@ def run():
  while True:
   try:
    s.scan()
-   if os.environ.get('GLOBAL_FILTER_ENABLED','true')!='true':
+   if os.environ.get('TRENCHNET_V2_ENABLED','true').lower()!='true':
     for _ in range(10):deliver(c,token,api,table='pumpfun_outbox');time.sleep(.5)
   except Exception as e:
    detail=(str(e) or type(e).__name__)[:160]

@@ -132,7 +132,7 @@ def reply(c, user_id, text):
                 age=max(0,int(time.time())-pons_health[0])
                 monitoring += f'\nPONS: {pons_health[1]}\nPONS update: {age}s ago'
                 if age>180:monitoring += ' (stale; check logs)'
-                if os.environ.get('GLOBAL_FILTER_ENABLED','true')=='true':
+                if os.environ.get('TRENCHNET_V2_ENABLED','true').lower()!='true':
                     ps=c.execute("SELECT pipeline_state,COUNT(*) FROM unified_launches WHERE launchpad='pons' GROUP BY pipeline_state").fetchall()
                     monitoring += '\nPONS unified: '+(', '.join(f'{k}={v}' for k,v in ps) or 'none yet')
                     gd=c.execute("SELECT reason,COUNT(*) FROM global_filter_decisions d JOIN unified_launches u ON u.event_key=d.event_key WHERE u.launchpad='pons' GROUP BY reason").fetchall()

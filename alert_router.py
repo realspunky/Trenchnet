@@ -1,7 +1,7 @@
 """Route globally-approved launches to users based on launchpad preferences."""
 import os,time
 from alert_preferences import setup as pref_setup, ensure_user, get
-from global_filter import alert_body
+from v2_qualification import alert_body
 from v2_intelligence import enabled as v2_enabled, gate as v2_gate
 from scanner import deliver
 
@@ -102,7 +102,7 @@ def enforce_preferences(c):
         if v2_enabled():
             ok,_=v2_gate(c,event_key,bonding,bool(migrated))
             if ok:
-                from global_filter import holder_reward_policy
+                from v2_qualification import holder_reward_policy
                 ok=holder_reward_policy(pad,metadata)
             if not ok:
                 with c:c.execute("UPDATE global_outbox SET state='v2_blocked' WHERE id=? AND state='pending'",(ident,))

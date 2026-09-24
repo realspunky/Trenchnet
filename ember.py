@@ -106,7 +106,7 @@ class Scanner:
                 old=self.c.execute('SELECT graduated FROM ember_tokens WHERE mint=?',(t['mint'],)).fetchone()
                 existing_unified=self.c.execute("SELECT 1 FROM unified_launches WHERE launchpad='embercurve' AND address=?",(t['mint'],)).fetchone()
                 v2_crossed=(os.environ.get('TRENCHNET_V2_ENABLED','false')!='true' or (isinstance(t.get('progress'),(int,float)) and t['progress']>=60) or t['graduated'])
-                if initialized and v2_crossed:
+                if initialized:
                     record_launch(self.c,chain='solana',launchpad='embercurve',address=t['mint'],creator=t['creator'],
                       name=t['name'],symbol=t['symbol'],pair_symbol=t['pair_symbol'],launched_at=now,bonding_progress=t['progress'],
                       migrated=t['graduated'],source_table='ember_tokens',metadata=t,now=now)
@@ -114,7 +114,7 @@ class Scanner:
                   VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(mint) DO UPDATE SET name=excluded.name,symbol=excluded.symbol,
                   creator=excluded.creator,pair_symbol=excluded.pair_symbol,progress=excluded.progress,graduated=excluded.graduated,
                   last_seen=excluded.last_seen,snapshot=excluded.snapshot''',(t['mint'],t['name'],t['symbol'],t['creator'],t['pair_symbol'],t['progress'],int(t['graduated']),now,now,json.dumps(t)))
-                if initialized and old is None:
+                if initialized and old is None and os.environ.get('TRENCHNET_V2_ENABLED','true').lower()!='true':
                     self.c.execute('INSERT OR IGNORE INTO ember_outbox(recipient,event_key,body,expires) VALUES(?,?,?,?)',
                       (self.recipient,'solana:'+t['mint']+':ember:launch',body(t),now+600));new+=1
             self.c.execute("INSERT OR REPLACE INTO ember_state VALUES('initialized','1')")
@@ -129,7 +129,7 @@ def run():
     while True:
         try:
             s.scan()
-            if os.environ.get('GLOBAL_FILTER_ENABLED','true')!='true':
+            if os.environ.get('TRENCHNET_V2_ENABLED','true').lower()!='true':
                 for _ in range(10):deliver(c,token,api,table='ember_outbox');time.sleep(.5)
         except Exception as e:
             msg='EmberCurve retrying: '+type(e).__name__+': '+str(e)[:180]

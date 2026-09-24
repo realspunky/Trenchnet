@@ -7,11 +7,11 @@ import time
 
 if __name__=='__main__':
     children=[subprocess.Popen([sys.executable,'-u','bot.py'])]
-    if os.environ.get('GLOBAL_FILTER_ENABLED','true')=='true':
-        children.append(subprocess.Popen([sys.executable,'-u','global_filter.py']))
-        children.append(subprocess.Popen([sys.executable,'-u','alert_router.py']))
-        if os.environ.get('TRENCHNET_V2_ENABLED','false')=='true':
-            children.append(subprocess.Popen([sys.executable,'-u','v2_tracker.py']))
+    if os.environ.get('TRENCHNET_V2_ENABLED','true').lower()!='true':
+        raise SystemExit('This is a V2-only build; set TRENCHNET_V2_ENABLED=true')
+    children.append(subprocess.Popen([sys.executable,'-u','v2_qualification.py']))
+    children.append(subprocess.Popen([sys.executable,'-u','alert_router.py']))
+    children.append(subprocess.Popen([sys.executable,'-u','v2_tracker.py']))
     if os.environ.get('SCANNER_ENABLED')=='true':
         children.append(subprocess.Popen([sys.executable,'-u','scanner.py']))
     if os.environ.get('STONK_ENABLED')=='true':

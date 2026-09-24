@@ -124,7 +124,11 @@ class Scanner:
             for mint,created in records:
                 # The overlap protects against delayed indexing and moving page boundaries.
                 if created>=max(started,since-600):
-                    self.c.execute('INSERT OR IGNORE INTO stonk_tokens(mint,created) VALUES(?,?)',(mint,created))
+                    inserted=self.c.execute('INSERT OR IGNORE INTO stonk_tokens(mint,created) VALUES(?,?)',(mint,created)).rowcount
+                    if inserted and os.environ.get('TRENCHNET_V2_ENABLED','true').lower()=='true':
+                        record_launch(self.c,chain='solana',launchpad='stonk',address=mint,
+                                      launched_at=created,source_table='stonk_tokens',
+                                      metadata={'mint':mint},now=now)
             self.c.execute('UPDATE stonk_cursor SET since=? WHERE id=1',(max(since,watermark),))
         threshold_row=self.c.execute('SELECT threshold FROM users WHERE id=?',(self.recipient,)).fetchone()
         threshold=threshold_row[0] if threshold_row else 80
@@ -151,12 +155,12 @@ class Scanner:
                 # Only holder-reward launches with an allowed 1%-3% transfer tax may
                 # enter the unified alert pipeline. Metadata resolution alone is not
                 # enough to qualify a STOnK launch.
-                if s['eligible'] and (os.environ.get('TRENCHNET_V2_ENABLED','false')!='true' or s['progress']>=60 or s['status']=='graduated'):
+                if os.environ.get('TRENCHNET_V2_ENABLED','true').lower()=='true' or s['eligible']:
                     record_launch(self.c,chain='solana',launchpad='stonk',address=mint,name=s['name'],symbol=s['symbol'],
                         launched_at=int(created),bonding_progress=s['progress'],migrated=s['status']=='graduated',
                         source_table='stonk_tokens',metadata=s)
                 items=[]
-                if status=='tracking':
+                if os.environ.get('TRENCHNET_V2_ENABLED','true').lower()!='true' and status=='tracking':
                     if 0<=time.time()-created<=600:items.append(('launch','New launch'))
                     if self.bonding_enabled and threshold<=s['progress']<100:items.append(('bonding','Pre-migration threshold reached'))
                 with self.c:
@@ -187,7 +191,7 @@ def run():
         delay=max(3,int(os.environ.get('STONK_POLL_SECONDS','8')))
         try:
             scanner.scan()
-            if os.environ.get('GLOBAL_FILTER_ENABLED','true')!='true':
+            if os.environ.get('TRENCHNET_V2_ENABLED','true').lower()!='true':
                 for _ in range(5):
                     deliver(c,token,api,table='stonk_outbox')
                     time.sleep(1)

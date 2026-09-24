@@ -89,8 +89,8 @@ def record(c, *, chain, launchpad, address, name='', symbol='', creator='', pair
     setup(c)
     with c:
         c.execute('''INSERT INTO unified_launches(event_key,chain,launchpad,address,creator,name,symbol,pair_symbol,
-          source_tx,source_height,launched_at,first_seen,last_seen,bonding_progress,migrated,source_table,metadata,social_x_url,website_url)
-          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          source_tx,source_height,launched_at,first_seen,last_seen,bonding_progress,migrated,source_table,metadata,social_x_url,website_url,pipeline_state)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           ON CONFLICT(event_key) DO UPDATE SET
             creator=CASE WHEN excluded.creator<>'' THEN excluded.creator ELSE unified_launches.creator END,
             name=CASE WHEN excluded.name<>'' THEN excluded.name ELSE unified_launches.name END,
@@ -104,14 +104,17 @@ def record(c, *, chain, launchpad, address, name='', symbol='', creator='', pair
             social_x_url=CASE WHEN excluded.social_x_url<>'' THEN excluded.social_x_url ELSE unified_launches.social_x_url END,
             website_url=CASE WHEN excluded.website_url<>'' THEN excluded.website_url ELSE unified_launches.website_url END''',
           (event_key,chain,launchpad,address,str(creator or ''),str(name or ''),str(symbol or ''),str(pair_symbol or ''),
-           str(source_tx or ''),source_height,launched_at,now,now,bonding_progress,int(bool(migrated)),source_table,payload,social_x_url,website_url))
+           str(source_tx or ''),source_height,launched_at,now,now,bonding_progress,int(bool(migrated)),source_table,payload,social_x_url,website_url,
+           'v2_tracking' if __import__('os').environ.get('TRENCHNET_V2_ENABLED','true').lower()=='true' else 'intake'))
     try:
         from v2_intelligence import enabled as v2_enabled, mark_progress, upsert_intelligence
         if v2_enabled():
             mark_progress(c,event_key,address,launchpad,bonding_progress,launched_at,migrated,now)
             # Source metadata may already contain Stage-2 facts. Extract them immediately;
             # missing facts remain incomplete and therefore cannot alert.
-            upsert_intelligence(c,event_key,address,launchpad,metadata or {},source=source_table,now=now)
+            # Heavy enrichment is exclusively post-crossing in V2 tracker.
+            if bonding_progress is not None and float(bonding_progress)>=60:
+                upsert_intelligence(c,event_key,address,launchpad,metadata or {},source=source_table,now=now)
     except Exception:
         # Intake must remain durable even if enrichment is temporarily unavailable.
         pass

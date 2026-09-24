@@ -120,7 +120,8 @@ class Scanner:
                     self.c.execute('''INSERT OR IGNORE INTO pons_tokens(address,creator,name,symbol,pool,factory,tx,height,created,status,snapshot)
                         VALUES(?,?,?,?,?,?,?,?,?,?,?)''',(address,creator,name,symbol,pool,factory.lower(),t['tx'],t['height'],t['created'],
                         'intake',json.dumps(t)))
-                    self.c.execute('INSERT OR IGNORE INTO pons_outbox(recipient,event_key,body,expires) VALUES(?,?,?,?)',
+                    if os.environ.get('TRENCHNET_V2_ENABLED','true').lower()!='true':
+                        self.c.execute('INSERT OR IGNORE INTO pons_outbox(recipient,event_key,body,expires) VALUES(?,?,?,?)',
                         (self.recipient,'robinhood:'+address+':launch',alert_body(t,decision),int(time.time())+600))
                 found+=1
             end_block=self.w3.eth.get_block(end)
@@ -146,7 +147,7 @@ def run():
     while True:
         try:
             scanner.scan()
-            if os.environ.get('GLOBAL_FILTER_ENABLED','true')!='true':
+            if os.environ.get('TRENCHNET_V2_ENABLED','true').lower()!='true':
                 for _ in range(10):deliver(c,token,api,table='pons_outbox');time.sleep(.5)
         except Exception as e:
             scanner.health('PONS retrying: '+type(e).__name__+'; reduce/check RPC log requests if persistent')
