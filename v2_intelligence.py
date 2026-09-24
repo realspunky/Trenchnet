@@ -98,19 +98,26 @@ def stage2_required():
     return os.environ.get("STAGE2_REQUIRED","true").strip().lower() not in {"0","false","no","off"}
 
 def normalize_progress(value):
+    """Normalize the canonical V2 bonding value as a percentage (0..100).
+
+    IMPORTANT: values reaching the unified/V2 pipeline are already percentages.
+    Never guess that values <= 1 are fractions: 0.98 means 0.98%, not 98%.
+    Launchpad adapters that receive fractional source values must convert them to
+    percent explicitly before storing/returning them. This keeps qualification and
+    alert rendering on the exact same value.
+    """
     try:
         x=float(value)
     except (TypeError,ValueError):
         return None
-    if 0 <= x <= 1: x*=100
     if not 0 <= x <= 100: return None
     return x
 
 def bonding_gate(progress, migrated=False):
     p=normalize_progress(progress)
-    # Graduated is equivalent to a completed curve only when the scanner explicitly
-    # verified that status; otherwise missing progress remains fail-closed.
-    if migrated and p is None: return 100.0
+    # V2 is fail-closed: migrated/graduated status never substitutes for a missing
+    # verified percentage. Launchpad adapters must explicitly store 100.0 when a
+    # completed curve is verified.
     return p if p is not None and p >= V2_MIN_BONDING else None
 
 def mark_progress(c,event_key,address,launchpad,progress,launched_at=None,migrated=False,now=None):

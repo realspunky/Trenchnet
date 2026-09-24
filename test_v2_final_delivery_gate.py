@@ -15,3 +15,11 @@ def test_pending_alert_rechecked_and_blocked_under_90(monkeypatch):
  c.execute("INSERT INTO global_outbox(recipient,event_key,body,state,expires) VALUES(1,'e','x','pending',9999999999)");c.commit()
  alert_router.enforce_preferences(c)
  assert c.execute("SELECT state FROM global_outbox WHERE event_key='e'").fetchone()[0]=='v2_blocked'
+
+def test_pending_pons_point98_is_blocked_even_with_stage2_bypass(monkeypatch):
+ monkeypatch.setenv('TRENCHNET_V2_ENABLED','true')
+ monkeypatch.setenv('STAGE2_REQUIRED','false')
+ c=db();c.execute("INSERT INTO unified_launches(event_key,chain,launchpad,address,name,symbol,bonding_progress,migrated,metadata) VALUES('p098','robinhood','pons','m','N','N',0.98,0,'{}')")
+ c.execute("INSERT INTO global_outbox(recipient,event_key,body,state,expires) VALUES(1,'p098','Bonding progress: 0.98%','pending',9999999999)");c.commit()
+ alert_router.enforce_preferences(c)
+ assert c.execute("SELECT state FROM global_outbox WHERE event_key='p098'").fetchone()[0]=='v2_blocked'

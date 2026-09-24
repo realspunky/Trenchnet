@@ -6,7 +6,7 @@ def test_fixed_60_gate():
     assert V2_MIN_BONDING == 60.0
     assert bonding_gate(59.999, False) is None
     assert bonding_gate(60, False) == 60.0
-    assert bonding_gate(.60, False) == 60.0
+    assert bonding_gate(.60, False) is None
 
 def test_threshold_command_removed(monkeypatch):
     c=sqlite3.connect(':memory:')

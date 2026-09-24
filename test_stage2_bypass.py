@@ -27,3 +27,14 @@ def test_stage2_true_still_blocks_without_intel(monkeypatch):
     monkeypatch.setenv('STAGE2_REQUIRED','true')
     c=conn()
     assert gate(c,'x',60.0,False)==(False,'intelligence_incomplete')
+
+def test_canonical_percentage_never_guesses_fraction(monkeypatch):
+    monkeypatch.setenv('TRENCHNET_V2_ENABLED','true')
+    monkeypatch.setenv('STAGE2_REQUIRED','false')
+    c=conn()
+    # Regression: PONS 0.98% used to be multiplied by 100 and incorrectly pass.
+    assert gate(c,'pons-low',0.98,False)==(False,'bonding_below_60')
+    assert gate(c,'edge-low',59.99,False)==(False,'bonding_below_60')
+    assert gate(c,'edge-pass',60.0,False)==(True,'stage2_bypassed')
+    assert gate(c,'high-pass',98.0,False)==(True,'stage2_bypassed')
+    assert gate(c,'missing',None,False)==(False,'bonding_below_60')

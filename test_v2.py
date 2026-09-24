@@ -16,7 +16,7 @@ def full():
 def test_60_is_absolute():
     assert bonding_gate(59.999,False) is None
     assert bonding_gate(60,False)==60
-    assert bonding_gate(.60,False)==60
+    assert bonding_gate(.60,False) is None
 
 def test_incomplete_stage2_never_ready():
     c=db(); e="solana:stonk:x:launch"
