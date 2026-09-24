@@ -2,7 +2,7 @@
 import hashlib,json,os,struct,time,urllib.request,ipaddress,socket
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
-from scanner import clean,deliver
+from scanner import clean
 from launch_model import setup as unified_setup, record as record_launch
 
 PROGRAM=os.environ.get('PUMPFUN_PROGRAM','6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P')
@@ -14,13 +14,9 @@ def setup(c):
  c.executescript('''
  CREATE TABLE IF NOT EXISTS pumpfun_tokens(mint TEXT PRIMARY KEY,name TEXT,symbol TEXT,creator TEXT,uri TEXT,
    signature TEXT,slot INTEGER,first_seen INTEGER,snapshot TEXT);
- CREATE TABLE IF NOT EXISTS pumpfun_outbox(id INTEGER PRIMARY KEY,recipient INTEGER,event_key TEXT,body TEXT,
-   state TEXT DEFAULT 'pending',attempts INTEGER DEFAULT 0,next_attempt INTEGER DEFAULT 0,message_id INTEGER,
-   expires INTEGER NOT NULL DEFAULT 0,UNIQUE(recipient,event_key));
  CREATE TABLE IF NOT EXISTS pumpfun_health(id INTEGER PRIMARY KEY CHECK(id=1),updated INTEGER,status TEXT);
  CREATE TABLE IF NOT EXISTS pumpfun_state(key TEXT PRIMARY KEY,value TEXT);
  ''')
- with c:c.execute("UPDATE pumpfun_outbox SET state='uncertain' WHERE state='sending'")
  unified_setup(c)
 
 def rpc(method,params,url=RPC):
