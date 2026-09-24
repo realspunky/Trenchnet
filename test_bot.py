@@ -21,10 +21,10 @@ class Rules(unittest.TestCase):
         c = sqlite3.connect(':memory:')
         setup(c)
         c.execute('CREATE TABLE users (id INTEGER PRIMARY KEY, threshold INTEGER DEFAULT 80)')
-        reply(c, 1, '/threshold 95')
-        self.assertIn('80%', reply(c, 2, '/status'))
+        self.assertNotIn('threshold saved', reply(c, 1, '/threshold 95').lower())
+        self.assertNotIn('/threshold', reply(c, 1, '/help'))
         reply(c, 1, '/threshold 96')
-        self.assertIn('95%', reply(c, 1, '/status'))
+        self.assertIn('fixed at 60%', reply(c, 1, '/status'))
         reply(c, 1, '/delete_me')
         self.assertIsNone(c.execute('SELECT * FROM users WHERE id=1').fetchone())
 

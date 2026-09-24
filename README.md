@@ -9,7 +9,7 @@
 3. Set `TRIALS_ENABLED=false` and `SCANNER_ENABLED=false`. Set the Railway service start command to exactly `python run.py`. Allow the new deployment to finish.
 4. In a private chat with your bot, send `/myid`. Copy the number into a Railway variable named `ADMIN_CHAT_ID`. This must be your own positive private Telegram user ID, not a bot username or group ID.
 5. Set `SCANNER_ENABLED=true` and deploy the variable changes. Keep one replica, no HTTP healthcheck and service sleeping off: this is a background worker.
-6. Send `/threshold 85` (or any whole number 80–95), then `/status`. The owner's status includes checkpoint/lag, last scanner update, token states and private delivery counts. Initially no tokens/alerts is normal: the scanner starts at the current finalized block and waits for new launches.
+6. Send `/status`. V2 uses one fixed 60% bonding filter for every supported launchpad; there is no per-user bonding threshold setting. The owner status includes scanner health, token states and delivery counts. Initially no tokens/alerts is normal while scanners establish their live working sets.
 
 To stop pilot alerts, set `SCANNER_ENABLED=false` and deploy. Leave the volume in place. Do not enable public trials yet: the private pilot bypasses subscriber access and sends only to ADMIN_CHAT_ID.
 
@@ -85,7 +85,7 @@ Bonding delivery is deliberately disabled in the production entry point. Sample 
 
 Restart checkpoints, tokens, health and outbox are stored in separate stonk_* tables on the existing volume. The first run starts now; older launches are not replayed. The discovery cursor overlaps ten minutes to accommodate index delays and page movement. At most five pages of 100 records are read per cycle. A larger backlog pauses without advancing the checkpoint. Late indexing beyond the overlap can miss launches; this is a bounded API pilot, not a complete on-chain indexer. Tracking checks eight due tokens per cycle and delivers up to five messages with spacing, then waits 60 seconds. Large token queues and network delays slow observation. API response timestamps older than five minutes are rejected; this tests response freshness, not per-token on-chain freshness. Explicit 429s respect Retry-After. Five failed token inspections require review. Ambiguous Telegram sends are not blindly resent, and pending alerts expire after five minutes.
 
-/status includes Stonk status, last update, token counts and delivery counts for the configured owner. The same /threshold setting is reserved for both networks, but only BNB currently emits bonding alerts. No database deletion or second Telegram bot is required.
+/status includes scanner status, last update, token counts and delivery counts for the configured owner. V2 bonding qualification is fixed at 60%; `/threshold` is no longer a user setting. No database deletion or second Telegram bot is required.
 
 Tests: 39 automated checks across BNB, access and Stonk, including rate/tax gates, stale API rejection, pagination limits, restart deduplication, chain/token identity, production launch-only behavior and isolated delivery. Pons/Robinhood remains pending.
 

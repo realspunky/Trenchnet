@@ -140,7 +140,7 @@ def process(c, recipient, now=None, limit=100, duplicate_window=None, creator_wi
             cross=c.execute("SELECT crossed_90_at FROM v2_intelligence WHERE event_key=?",(event_key,)).fetchone()
             cross_at=int(cross[0] or 0) if cross else 0
             if not cross_at or cross_at < now-max_age or cross_at > now+120:
-                decision={'allow':False,'reason':'stale_90_crossing','duplicates':1,'unique_creators':1,'creator_launches':1}
+                decision={'allow':False,'reason':'stale_bonding_crossing','duplicates':1,'unique_creators':1,'creator_launches':1}
             else:
                 decision=assess(c,chain=chain,launchpad=launchpad,address=address,creator=creator,name=name,symbol=symbol,now=now,duplicate_window=duplicate_window,creator_window=creator_window,creator_limit=creator_limit)
         else:
@@ -149,8 +149,8 @@ def process(c, recipient, now=None, limit=100, duplicate_window=None, creator_wi
             c.execute('INSERT OR REPLACE INTO global_filter_decisions (event_key,decided_at,allow,reason,duplicate_count,unique_creators,creator_launches) VALUES(?,?,?,?,?,?,?)',(event_key,now,int(decision['allow']),decision['reason'],decision['duplicates'],decision['unique_creators'],decision['creator_launches']))
             if decision['allow']: allowed+=1
             else: blocked+=1
-            if decision['reason'] in {'bonding_below_90','intelligence_incomplete'}:
-                pipeline_state='v2_tracking' if decision['reason']=='bonding_below_90' else 'awaiting_intelligence'
+            if decision['reason'] in {'bonding_below_60','intelligence_incomplete'}:
+                pipeline_state='v2_tracking' if decision['reason']=='bonding_below_60' else 'awaiting_intelligence'
             else:
                 pipeline_state='approved' if decision['allow'] else 'filtered'
             c.execute("UPDATE unified_launches SET pipeline_state=? WHERE event_key=?",(pipeline_state,event_key))

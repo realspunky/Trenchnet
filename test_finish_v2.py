@@ -10,6 +10,6 @@ def test_missing_volume_still_blocks():
     m={'description':'x','social_checked':True,'holders':{'count':10,'top10Pct':30},'snipers':{'count':2,'concentrationPct':4},'trades':{'buys':5,'sells':2,'uniqueBuyers':4,'uniqueSellers':2}}
     assert not complete(extract(m))
 
-def test_90_gate_exact():
-    assert bonding_gate(89.999) is None
-    assert bonding_gate(90)==90
+def test_60_gate_exact():
+    assert bonding_gate(59.999) is None
+    assert bonding_gate(60)==60

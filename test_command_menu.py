@@ -9,4 +9,4 @@ def test_beta_menu_hides_commercial_and_status(monkeypatch):
     assert "plans" not in names
     assert "price" not in names
     assert "pricing" not in names
-    assert {"start","alerts","threshold","help"}.issubset(names)
+    assert {"start","alerts","help"}.issubset(names)

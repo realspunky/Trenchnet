@@ -12,7 +12,7 @@ def test_beta_hides_status_and_price_but_admin_keeps_status():
         assert bot.reply(c,2,'/status')=='Use /help to see available commands.'
         assert bot.reply(c,2,'/price')=='Use /help to see available commands.'
         assert bot.reply(c,2,'/plans')=='Use /help to see available commands.'
-        assert 'Bonding threshold' in bot.reply(c,1,'/status')
+        assert 'Bonding filter: fixed at 60%' in bot.reply(c,1,'/status')
 
 def test_beta_help_has_no_status_price_or_trial():
     c=db()
