@@ -124,11 +124,14 @@ class Scanner:
             for mint,created in records:
                 # The overlap protects against delayed indexing and moving page boundaries.
                 if created>=max(started,since-600):
-                    inserted=self.c.execute('INSERT OR IGNORE INTO stonk_tokens(mint,created) VALUES(?,?)',(mint,created)).rowcount
-                    if inserted and os.environ.get('TRENCHNET_V2_ENABLED','true').lower()=='true':
-                        record_launch(self.c,chain='solana',launchpad='stonk',address=mint,
-                                      launched_at=created,source_table='stonk_tokens',
-                                      metadata={'mint':mint},now=now)
+                    self.c.execute('INSERT OR IGNORE INTO stonk_tokens(mint,created) VALUES(?,?)',(mint,created))
+                    # V2 owns qualification. Record every detected STOnK launch immediately,
+                    # even before token metadata/progress is available. Missing progress is
+                    # fail-closed by V2 and remains silent until a verified percentage arrives.
+                    # This prevents metadata/tax/reward checks from acting as a hidden V1 gate.
+                    record_launch(self.c,chain='solana',launchpad='stonk',address=mint,
+                        launched_at=int(created),bonding_progress=None,source_table='stonk_tokens',
+                        metadata={'detection_source':'stonk_launches_feed'})
             self.c.execute('UPDATE stonk_cursor SET since=? WHERE id=1',(max(since,watermark),))
         threshold_row=self.c.execute('SELECT threshold FROM users WHERE id=?',(self.recipient,)).fetchone()
         threshold=threshold_row[0] if threshold_row else 80
@@ -145,28 +148,19 @@ class Scanner:
         rows=fresh_rows+fresh_retry+maintenance
         failures=0
         for mint,created,attempts in rows:
-            # Keep the mint locally immediately, but do NOT enter the unified alert
-            # pipeline until verified token metadata is available. TrenchNet must never
-            # send a STOnK launch alert named "Unknown token".
+            # Enrich the already-recorded V2 detection. Metadata may remain unresolved,
+            # but unresolved metadata can never produce an alert because V2 fails closed.
             try:
                 data,generated=self.get('/tokens/'+mint)
                 s=normalize(data,mint)
-                status='migrated' if s['status']=='graduated' else ('tracking' if s['eligible'] else 'excluded')
-                # Only holder-reward launches with an allowed 1%-3% transfer tax may
-                # enter the unified alert pipeline. Metadata resolution alone is not
-                # enough to qualify a STOnK launch.
-                if os.environ.get('TRENCHNET_V2_ENABLED','true').lower()=='true' or s['eligible']:
+                status='migrated' if s['status']=='graduated' else 'tracking'
+                # Feed verified progress/metadata into V2. Tax + holder-reward policy is
+                # evaluated later by v2_qualification, never by the scanner.
+                if isinstance(s.get('progress'),(int,float)) and 0 <= s['progress'] <= 100:
                     record_launch(self.c,chain='solana',launchpad='stonk',address=mint,name=s['name'],symbol=s['symbol'],
                         launched_at=int(created),bonding_progress=s['progress'],migrated=s['status']=='graduated',
                         source_table='stonk_tokens',metadata=s)
-                items=[]
-                if os.environ.get('TRENCHNET_V2_ENABLED','true').lower()!='true' and status=='tracking':
-                    if 0<=time.time()-created<=600:items.append(('launch','New launch'))
-                    if self.bonding_enabled and threshold<=s['progress']<100:items.append(('bonding','Pre-migration threshold reached'))
                 with self.c:
-                    for kind,title in items:
-                                        self.c.execute('INSERT OR IGNORE INTO stonk_outbox(recipient,event_key,body,expires) VALUES(?,?,?,?)',
-                            (self.recipient,'solana:'+mint+':'+kind,body(s,title,generated),int(time.time())+300))
                     self.c.execute('UPDATE stonk_tokens SET status=?,snapshot=?,next_check=?,attempts=0 WHERE mint=?',
                         (status,json.dumps(s),time.time()+60,mint))
             except RateLimited:raise
@@ -191,10 +185,6 @@ def run():
         delay=max(3,int(os.environ.get('STONK_POLL_SECONDS','8')))
         try:
             scanner.scan()
-            if os.environ.get('TRENCHNET_V2_ENABLED','true').lower()!='true':
-                for _ in range(5):
-                    deliver(c,token,api,table='stonk_outbox')
-                    time.sleep(1)
         except RateLimited as e:
             delay=e.delay;scanner.health('Stonk rate limited; waiting for provider retry window')
         except Exception as e:
