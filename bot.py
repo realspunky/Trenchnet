@@ -70,6 +70,14 @@ def reply(c, user_id, text):
     if cmd == '/status':
         if os.environ.get('BETA_TESTING_ENABLED','false') == 'true' and str(user_id) != os.environ.get('ADMIN_CHAT_ID'):
             return 'Use /help to see available commands.'
+        # V2 has a dedicated diagnostic dashboard. Never mix V1 trial/pilot/history
+        # into it; persistent /data is preserved and V1 status remains available
+        # automatically whenever V2 is disabled.
+        if os.environ.get('TRENCHNET_V2_ENABLED','false').lower() == 'true':
+            if str(user_id) != os.environ.get('ADMIN_CHAT_ID'):
+                return 'Use /help to see available commands.'
+            from v2_status import build as build_v2_status
+            return build_v2_status(c)
         threshold = c.execute('SELECT threshold FROM users WHERE id=?', (user_id,)).fetchone()[0]
         kind, expiry = state(c, user_id)
         expiry_text = time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(expiry)) if expiry else 'none'
@@ -240,7 +248,7 @@ def main():
                 msg = update.get('message', {})
                 if msg.get('chat', {}).get('type') == 'private' and 'text' in msg:
                     uid=msg['from']['id']; result=reply(c,uid,msg['text'])
-                    markup = alert_keyboard(c,uid) if msg['text'].split()[0].split('@')[0]=='/alerts' else ({'remove_keyboard': True} if os.environ.get('BETA_TESTING_ENABLED','false')=='true' else {'keyboard': [[{'text': 'Start Free Trial'}]], 'resize_keyboard': True})
+                    markup = alert_keyboard(c,uid) if msg['text'].split()[0].split('@')[0]=='/alerts' else ({'remove_keyboard': True} if (os.environ.get('BETA_TESTING_ENABLED','false')=='true' or os.environ.get('TRENCHNET_V2_ENABLED','false').lower()=='true') else {'keyboard': [[{'text': 'Start Free Trial'}]], 'resize_keyboard': True})
                     api(token, 'sendMessage', {'chat_id': msg['chat']['id'], 'text': result, 'reply_markup': markup})
                 cq=update.get('callback_query')
                 if cq and cq.get('data','').startswith('alerts:'):
