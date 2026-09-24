@@ -52,6 +52,10 @@ def setup(c):
       last_error TEXT NOT NULL DEFAULT ''
     );
     CREATE INDEX IF NOT EXISTS v2_state_idx ON v2_intelligence(state,updated_at);
+    CREATE TABLE IF NOT EXISTS v2_runtime(
+      id INTEGER PRIMARY KEY CHECK(id=1),
+      session_started_at INTEGER NOT NULL
+    );
     """)
     # Forward-compatible migration for persistent /data databases.
     cols={r[1] for r in c.execute("PRAGMA table_info(v2_intelligence)").fetchall()}
@@ -59,6 +63,18 @@ def setup(c):
     for name,typ in migrations.items():
         if name not in cols:c.execute(f"ALTER TABLE v2_intelligence ADD COLUMN {name} {typ}")
     c.commit()
+
+def start_session(c, now=None):
+    """Record this Railway V2 process start without touching historical token rows."""
+    setup(c); now=int(time.time() if now is None else now)
+    with c:
+        c.execute("INSERT OR REPLACE INTO v2_runtime(id,session_started_at) VALUES(1,?)",(now,))
+    return now
+
+def session_started_at(c):
+    setup(c)
+    r=c.execute("SELECT session_started_at FROM v2_runtime WHERE id=1").fetchone()
+    return int(r[0]) if r and r[0] is not None else None
 
 def enabled():
     return os.environ.get("TRENCHNET_V2_ENABLED","false").lower()=="true"

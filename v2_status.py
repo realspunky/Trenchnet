@@ -1,35 +1,33 @@
-"""Compact admin-only V2 diagnostic status.
-
-This deliberately does not mix V1 access/trial/pilot history into V2 testing.
-Counts are active-window diagnostics so persistent /data history does not swamp
-what the current V2 worker is doing.
-"""
+"""Admin-only V2 diagnostic status, isolated from persistent V1/history counters."""
 import os, sqlite3, time
-from v2_intelligence import REQUIRED, setup as v2_setup
+from v2_intelligence import REQUIRED, setup as v2_setup, session_started_at
 
 ACTIVE_SECONDS = int(os.environ.get('V2_STATUS_ACTIVE_SECONDS','600'))
 PADS = (('flap','Flap'),('stonk','STOnK'),('pons','PONS'),('embercurve','EmberCurve'),('pumpfun','Pump.fun'))
 
 def _one(c, sql, args=(), default=0):
     try:
-        r=c.execute(sql,args).fetchone()
-        return default if not r or r[0] is None else r[0]
-    except sqlite3.OperationalError:
-        return default
+        r=c.execute(sql,args).fetchone(); return default if not r or r[0] is None else r[0]
+    except sqlite3.OperationalError:return default
 
-def _health(c, table, stale=180):
+def _health(c, table, green=60, yellow=180):
     try:r=c.execute(f'SELECT updated,status FROM {table} WHERE id=1').fetchone()
     except sqlite3.OperationalError:return '⚪ no report'
     if not r:return '⚪ no report'
     age=max(0,int(time.time())-int(r[0]))
-    return ('🟢' if age <= stale else '🟡')+f' {age}s ago'
+    icon='🟢' if age<=green else ('🟡' if age<=yellow else '🔴')
+    suffix=''
+    status=str(r[1] or '').strip()
+    if icon!='🟢' and status and status.lower() not in {'ok','running'}:
+        suffix=' · '+status[:90]
+    return f'{icon} {age}s ago{suffix}'
 
 def _missing(c, cutoff):
-    # Only inspect active tokens that actually crossed the mandatory gate.
+    # Eligibility is based on when the mandatory gate was crossed, never updated_at.
     try:
         rows=c.execute("""SELECT description,social_checked,holder_count,top10_holder_pct,
           sniper_count,sniper_concentration_pct,buy_count,sell_count,unique_buyers,unique_sellers,volume
-          FROM v2_intelligence WHERE crossed_90_at IS NOT NULL AND state='awaiting_intelligence' AND updated_at>=?""",(cutoff,)).fetchall()
+          FROM v2_intelligence WHERE state='awaiting_intelligence' AND crossed_90_at>=?""",(cutoff,)).fetchall()
     except sqlite3.OperationalError:return {}
     names=list(REQUIRED); out={k:0 for k in names}
     for r in rows:
@@ -40,28 +38,33 @@ def _missing(c, cutoff):
     return {k:v for k,v in out.items() if v}
 
 def build(c):
-    now=int(time.time()); cutoff=now-ACTIVE_SECONDS
-    v2_setup(c)
+    now=int(time.time()); v2_setup(c)
+    session=session_started_at(c)
+    window_cutoff=now-ACTIVE_SECONDS
+    cutoff=max(window_cutoff,session or window_cutoff)
     try:h=c.execute('SELECT updated,message FROM v2_health WHERE id=1').fetchone()
     except sqlite3.OperationalError:h=None
     if h:
-        age=max(0,now-int(h[0])); engine=('🟢 Running' if age<=30 else '🟡 Stale')+f' · {age}s ago'
+        age=max(0,now-int(h[0])); engine=('🟢 Running' if age<=30 else ('🟡 Stale' if age<=120 else '🔴 Stale'))+f' · {age}s ago'
     else:engine='🔴 No tracker report'
     public='🟢 ON' if os.environ.get('PUBLIC_ALERTS_ENABLED','false').lower()=='true' else '🔴 OFF'
-    lines=['TRENCHNET V2 — PRIVATE TEST', '', f'Engine: {engine}', f'Public delivery: {public}', 'Bonding gate: ≥90% mandatory', f'Active window: last {ACTIVE_SECONDS//60}m', '']
+    scope=f'last {ACTIVE_SECONDS//60}m'
+    if session and session>window_cutoff: scope+=f' · session {max(0,now-session)//60}m old'
+    lines=['TRENCHNET V2 — PRIVATE TEST','',f'Engine: {engine}',f'Public delivery: {public}','Bonding gate: ≥90% mandatory',f'Active window: {scope}','']
 
     total_tracking=total_wait=total_ready=0
     health_tables={'flap':'scanner_health','stonk':'stonk_health','pons':'pons_health','embercurve':'ember_health','pumpfun':'pumpfun_health'}
+    health_limits={'flap':(60,180),'stonk':(60,180),'pons':(60,180),'embercurve':(60,180),'pumpfun':(30,90)}
     for pad,label in PADS:
-        tracking=_one(c,"SELECT COUNT(*) FROM v2_intelligence WHERE launchpad=? AND state='tracking' AND updated_at>=?",(pad,cutoff))
-        waiting=_one(c,"SELECT COUNT(*) FROM v2_intelligence WHERE launchpad=? AND state='awaiting_intelligence' AND crossed_90_at IS NOT NULL AND updated_at>=?",(pad,cutoff))
-        ready=_one(c,"SELECT COUNT(*) FROM v2_intelligence WHERE launchpad=? AND state='ready' AND updated_at>=?",(pad,cutoff))
+        # Tracking is a live working-set count. Crossed/awaiting/ready are strictly session/window scoped.
+        tracking=_one(c,"SELECT COUNT(*) FROM v2_intelligence WHERE launchpad=? AND state='tracking' AND updated_at>=?",(pad,window_cutoff))
         crossed=_one(c,"SELECT COUNT(*) FROM v2_intelligence WHERE launchpad=? AND crossed_90_at>=?",(pad,cutoff))
-        errors=_one(c,"SELECT COUNT(*) FROM v2_intelligence WHERE launchpad=? AND updated_at>=? AND last_error<>''",(pad,cutoff))
-        total_tracking+=tracking;total_wait+=waiting;total_ready+=ready
-        lines += [f'{label.upper()}  {_health(c,health_tables[pad],300 if pad=="stonk" else 180)}',
-                  f'Tracking <90%: {tracking} · Crossed 90%: {crossed}',
-                  f'Awaiting intel: {waiting} · Ready: {ready} · Errors: {errors}', '']
+        waiting=_one(c,"SELECT COUNT(*) FROM v2_intelligence WHERE launchpad=? AND state='awaiting_intelligence' AND crossed_90_at>=?",(pad,cutoff))
+        ready=_one(c,"SELECT COUNT(*) FROM v2_intelligence WHERE launchpad=? AND state IN ('ready','alerted') AND crossed_90_at>=?",(pad,cutoff))
+        errors=_one(c,"SELECT COUNT(*) FROM v2_intelligence WHERE launchpad=? AND crossed_90_at>=? AND last_error<>''",(pad,cutoff))
+        total_tracking+=tracking; total_wait+=waiting; total_ready+=ready
+        g,y=health_limits[pad]
+        lines += [f'{label.upper()}  {_health(c,health_tables[pad],g,y)}',f'Tracking <90%: {tracking} · Crossed 90%: {crossed}',f'Awaiting intel: {waiting} · Ready: {ready} · Errors: {errors}','']
 
     missing=_missing(c,cutoff)
     lines += ['STAGE 2',f'Below 90% / tracking: {total_tracking}',f'Awaiting intelligence: {total_wait}',f'Ready: {total_ready}']
@@ -70,12 +73,14 @@ def build(c):
         lines.append('Missing: '+', '.join(f'{pretty[k]}={v}' for k,v in missing.items()))
     else:lines.append('Missing: none in active awaiting set')
 
+    # A historical V1/global_outbox row can never appear here unless its token crossed
+    # the V2 90% gate during this session/window. This fixes misleading lifetime Sent totals.
     try:
         states=c.execute("""SELECT o.state,COUNT(*) FROM global_outbox o
           JOIN v2_intelligence v ON v.event_key=o.event_key
-          WHERE v.updated_at>=? AND o.state IN ('pending','sent','v2_blocked','preference_blocked','stale','metadata_blocked')
+          WHERE v.crossed_90_at>=? AND o.state IN ('pending','sent','v2_blocked','preference_blocked','stale','metadata_blocked')
           GROUP BY o.state""",(cutoff,)).fetchall()
     except sqlite3.OperationalError:states=[]
     sm=dict(states)
-    lines += ['', 'DELIVERY SAFETY', f"Queued: {sm.get('pending',0)} · Sent: {sm.get('sent',0)}", f"V2 blocked: {sm.get('v2_blocked',0)} · Preference blocked: {sm.get('preference_blocked',0)}", f"Stale/replay: {sm.get('stale',0)} · Metadata blocked: {sm.get('metadata_blocked',0)}"]
+    lines += ['','DELIVERY SAFETY',f"Queued: {sm.get('pending',0)} · Sent: {sm.get('sent',0)}",f"V2 blocked: {sm.get('v2_blocked',0)} · Preference blocked: {sm.get('preference_blocked',0)}",f"Stale/replay: {sm.get('stale',0)} · Metadata blocked: {sm.get('metadata_blocked',0)}"]
     return '\n'.join(lines)

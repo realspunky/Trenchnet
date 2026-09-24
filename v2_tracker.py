@@ -4,7 +4,7 @@ Adapters are deliberately source-driven. If a launchpad does not expose a fact
 reliably, the token stays awaiting_intelligence rather than receiving a fabricated value.
 """
 import json, os, sqlite3, time, urllib.request
-from v2_intelligence import setup, mark_progress, upsert_intelligence, complete, extract
+from v2_intelligence import setup, mark_progress, upsert_intelligence, complete, extract, start_session
 from v2_adapters import fetch as adapter_fetch
 from launch_model import social_links
 
@@ -82,7 +82,7 @@ def cycle(c,now=None,limit=None):
 def run():
     if os.environ.get("TRENCHNET_V2_ENABLED","false").lower()!="true":return
     from bot import database
-    c=database();setup(c)
+    c=database();setup(c);start_session(c)
     print("TrenchNet V2 tracker started.",flush=True)
     while True:
         try:
