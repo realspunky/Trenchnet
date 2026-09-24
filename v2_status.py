@@ -72,6 +72,15 @@ def build(c):
         pretty={'description':'description','social_checked':'social check','holder_count':'holders','top10_holder_pct':'top 10','sniper_count':'sniper count','sniper_concentration_pct':'sniper concentration','buy_count':'buys','sell_count':'sells','unique_buyers':'unique buyers','unique_sellers':'unique sellers','volume':'volume'}
         lines.append('Missing: '+', '.join(f'{pretty[k]}={v}' for k,v in missing.items()))
     else:lines.append('Missing: none in active awaiting set')
+    # Collector-level diagnostics make Stage 2 failures actionable.
+    try:
+        cr=c.execute("""SELECT s.collector,s.status,COUNT(*) FROM v2_collector_state s
+          JOIN v2_intelligence v ON v.event_key=s.event_key
+          WHERE v.state='awaiting_intelligence' AND v.crossed_90_at>=?
+          GROUP BY s.collector,s.status ORDER BY s.collector,s.status""",(cutoff,)).fetchall()
+    except sqlite3.OperationalError:cr=[]
+    if cr:
+        lines.append('Collectors: '+', '.join(f'{a} {b}={n}' for a,b,n in cr))
 
     # A historical V1/global_outbox row can never appear here unless its token crossed
     # the V2 60% gate during this session/window. This fixes misleading lifetime Sent totals.

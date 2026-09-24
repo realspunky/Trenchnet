@@ -106,3 +106,6 @@ Authenticated Binance Web3 remains optional enrichment only.
 - Successful holder pages are cached into unified metadata so retries do not repeatedly spend the Portal holder budget.
 - `awaiting_intelligence` rows are prioritized ahead of the below-90 tracking backlog and retry on a 20-second default backoff (`V2_INTELLIGENCE_RETRY_SECONDS`).
 - Valid zero metrics (for example zero sells or zero early wallets) are preserved as real data rather than incorrectly treated as missing.
+
+## Stage 2 Verification Engine rebuild
+Stage 2 now records independent collector states for metadata, socials, holders, trading, and snipers. Valid zero metrics remain verified; source/RPC errors remain retryable errors; only an explicit verified `*_unavailable` marker may satisfy a collector without values. The tracker now invokes the shared native/public Stage-2 enrichment path after the fixed 60% gate for Flap, STOnK, EmberCurve, and Pump.fun; PONS keeps its dedicated on-chain adapter. Awaiting tokens remain priority retry work independently of the 10-minute status display window.

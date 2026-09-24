@@ -31,7 +31,16 @@ def refresh_from_stored(c,row,now):
                          (bonding,json.dumps(meta,separators=(',',':'),default=str),now,sx,sx,web,web,event_key))
     crossed=mark_progress(c,event_key,address,launchpad,bonding,launched_at,bool(migrated),now)
     if not crossed:return False
-    # Heavy intelligence is strictly post-90. Authenticated Binance is optional enrichment only;
+    # Stage 2 is launchpad-specific underneath but normalized here. This call was
+    # previously missing from the tracker, which meant Ember/STOnK/Flap could cross
+    # the gate without ever running the shared native/public collectors.
+    if launchpad != "pons":
+        try:
+            from stage2_collectors import enrich
+            meta=enrich(launchpad,address,meta)
+        except Exception as e:
+            meta['stage2_enrich_error']=type(e).__name__+': '+str(e)[:120]
+    # Heavy intelligence is strictly post-60. Authenticated Binance is optional enrichment only;
     # native/launchpad collectors remain authoritative and missing facts stay fail-closed.
     try:
         from binance_web3_v2 import fetch as binance_advanced
@@ -46,7 +55,7 @@ def refresh_from_stored(c,row,now):
     except Exception as e:
         # Do not destroy native intelligence when Binance is unavailable/rate-limited.
         meta['binance_advanced_error']=type(e).__name__
-    return upsert_intelligence(c,event_key,address,launchpad,meta,source="verified_post90_enrichment",now=now)
+    return upsert_intelligence(c,event_key,address,launchpad,meta,source="verified_post60_stage2",now=now)
 
 def promote(c,event_key,ready):
     with c:

@@ -57,6 +57,16 @@ def setup(c):
       id INTEGER PRIMARY KEY CHECK(id=1),
       session_started_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS v2_collector_state(
+      event_key TEXT NOT NULL,
+      collector TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL,
+      last_error TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY(event_key,collector)
+    );
+    CREATE INDEX IF NOT EXISTS v2_collector_status_idx ON v2_collector_state(status,updated_at);
     """)
     # Forward-compatible migration for persistent /data databases.
     cols={r[1] for r in c.execute("PRAGMA table_info(v2_intelligence)").fetchall()}
@@ -171,6 +181,50 @@ def extract(metadata):
       "window_seconds":_num(_coalesce(_pick(trades,"windowSeconds","window_seconds"),_pick(stats,"windowSeconds","window_seconds")),True),
     }
 
+COLLECTOR_FIELDS = {
+    "metadata": ("description",),
+    "socials": ("social_checked",),
+    "holders": ("holder_count","top10_holder_pct"),
+    "trading": ("buy_count","sell_count","unique_buyers","unique_sellers","volume"),
+    "snipers": ("sniper_count","sniper_concentration_pct"),
+}
+
+def _collector_status(intel, metadata, collector):
+    fields=COLLECTOR_FIELDS[collector]
+    ok=True
+    for k in fields:
+        v=intel.get(k)
+        if k=="description": ok=ok and bool(str(v or "").strip())
+        elif k=="social_checked": ok=ok and v==1
+        else: ok=ok and v is not None
+    if ok:return "verified",""
+    unavailable=metadata.get(collector+"_unavailable")
+    if unavailable:return "unavailable",str(unavailable)[:180]
+    # Preserve source errors as retryable errors, not fake unavailable values.
+    error_keys={
+      "metadata":("metadata_error","pons_native_error"),
+      "socials":("social_error","public_market_error","pons_native_error"),
+      "holders":("holder_error","pons_holder_error","native_chain_error"),
+      "trading":("trade_error","pons_trade_error","pons_native_error","native_chain_error"),
+      "snipers":("sniper_error","pons_trade_error","pons_native_error","native_chain_error"),
+    }[collector]
+    for k in error_keys:
+        if metadata.get(k):return "error",str(metadata.get(k))[:180]
+    return "pending",""
+
+def update_collector_states(c,event_key,intel,metadata,now):
+    for collector in COLLECTOR_FIELDS:
+        status,err=_collector_status(intel,metadata,collector)
+        c.execute("""INSERT INTO v2_collector_state(event_key,collector,status,attempts,updated_at,last_error)
+          VALUES(?,?,?,?,?,?) ON CONFLICT(event_key,collector) DO UPDATE SET
+          status=excluded.status,attempts=v2_collector_state.attempts+1,updated_at=excluded.updated_at,last_error=excluded.last_error""",
+          (event_key,collector,status,1,now,err))
+
+def collectors_complete(c,event_key):
+    rows=c.execute("SELECT collector,status FROM v2_collector_state WHERE event_key=?",(event_key,)).fetchall()
+    d=dict(rows)
+    return all(d.get(k) in {"verified","unavailable"} for k in COLLECTOR_FIELDS)
+
 def complete(intel):
     if not intel.get("description"):return False
     if intel.get("social_checked") != 1:return False
@@ -185,14 +239,17 @@ def upsert_intelligence(c,event_key,address,launchpad,metadata,source="",now=Non
     assigns=",".join(f"{k}=excluded.{k}" for k in cols)
     vals=[intel[k] for k in cols]
     with c:
+        # Collector states are written before readiness is decided so status can explain exactly why a token is waiting.
+        update_collector_states(c,event_key,intel,metadata or {},now)
+        is_ready=complete(intel) or collectors_complete(c,event_key)
         c.execute(f"""INSERT INTO v2_intelligence(event_key,address,launchpad,updated_at,state,{','.join(cols)},source,raw)
           VALUES(?,?,?,?,?,{','.join('?' for _ in cols)},?,?)
           ON CONFLICT(event_key) DO UPDATE SET updated_at=excluded.updated_at,{assigns},source=excluded.source,raw=excluded.raw,
           state=CASE WHEN v2_intelligence.crossed_90_at IS NULL THEN 'tracking'
                      WHEN excluded.state='ready' THEN 'ready' ELSE 'awaiting_intelligence' END""",
-          [event_key,address,launchpad,now,"ready" if complete(intel) else "awaiting_intelligence",*vals,source,
+          [event_key,address,launchpad,now,"ready" if is_ready else "awaiting_intelligence",*vals,source,
            json.dumps(metadata or {},separators=(",",":"),default=str)])
-    return complete(intel)
+    return is_ready
 
 def gate(c,event_key,bonding,migrated=False):
     if not enabled():return True,"v2_disabled"
