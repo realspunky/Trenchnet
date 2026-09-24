@@ -90,6 +90,13 @@ def session_started_at(c):
 def enabled():
     return os.environ.get("TRENCHNET_V2_ENABLED","false").lower()=="true"
 
+def stage2_required():
+    """Whether Stage 2 intelligence is a delivery requirement.
+
+    Test-only bypass: bonding verification remains mandatory.
+    """
+    return os.environ.get("STAGE2_REQUIRED","true").strip().lower() not in {"0","false","no","off"}
+
 def normalize_progress(value):
     try:
         x=float(value)
@@ -254,12 +261,17 @@ def upsert_intelligence(c,event_key,address,launchpad,metadata,source="",now=Non
 def gate(c,event_key,bonding,migrated=False):
     if not enabled():return True,"v2_disabled"
     if bonding_gate(bonding,migrated) is None:return False,"bonding_below_60"
+    # During isolated delivery testing Stage 2 may be bypassed, but the bonding
+    # gate above is NEVER bypassed.
+    if not stage2_required():return True,"stage2_bypassed"
     setup(c)
     r=c.execute("SELECT state FROM v2_intelligence WHERE event_key=?",(event_key,)).fetchone()
     if not r or r[0]!="ready":return False,"intelligence_incomplete"
     return True,"v2_ready"
 
 def render(c,event_key):
+    if enabled() and not stage2_required():
+        return ["","🧪 STAGE 2 VERIFICATION BYPASSED","⚠️ Delivery test only — bonding ≥60% is still mandatory."]
     setup(c);c.row_factory=None
     r=c.execute("""SELECT description,holder_count,top10_holder_pct,dev_holding_pct,dev_total_launches,dev_migrated_count,dev_funding_source,sniper_count,
       sniper_concentration_pct,largest_sniper_pct,sniper_still_holding,sniper_sold,bundled_wallet_count,

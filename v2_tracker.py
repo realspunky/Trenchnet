@@ -4,7 +4,7 @@ Adapters are deliberately source-driven. If a launchpad does not expose a fact
 reliably, the token stays awaiting_intelligence rather than receiving a fabricated value.
 """
 import json, os, sqlite3, time, urllib.request
-from v2_intelligence import setup, mark_progress, upsert_intelligence, complete, extract, start_session
+from v2_intelligence import setup, mark_progress, upsert_intelligence, complete, extract, start_session, stage2_required
 from v2_adapters import fetch as adapter_fetch
 from launch_model import social_links
 
@@ -31,6 +31,10 @@ def refresh_from_stored(c,row,now):
                          (bonding,json.dumps(meta,separators=(',',':'),default=str),now,sx,sx,web,web,event_key))
     crossed=mark_progress(c,event_key,address,launchpad,bonding,launched_at,bool(migrated),now)
     if not crossed:return False
+    # Isolated delivery test mode: once verified bonding crosses 60%, promote
+    # directly to intake. Stage 2 collectors are intentionally skipped.
+    if not stage2_required():
+        return True
     # Stage 2 is launchpad-specific underneath but normalized here. This call was
     # previously missing from the tracker, which meant Ember/STOnK/Flap could cross
     # the gate without ever running the shared native/public collectors.
