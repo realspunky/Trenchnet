@@ -58,6 +58,7 @@ def normalize(address, state, tax):
         dividend_allocation_bps=tax['dividendBps'],
         reward_token=tax.get('dividendToken'), minimum_share_balance=str(tax.get('minimumShareBalance','')),
         tax_allocations={k:tax[k] for k in allocations},
+        pool=state.get('pool'), quote_token_address=state.get('quoteTokenAddress'),
         explorer_url='https://bscscan.com/token/'+address.lower())
 
 class Reader:

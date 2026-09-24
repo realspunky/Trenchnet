@@ -168,7 +168,9 @@ class Scanner:
      meta=self.metadata_get(t.get('uri')) if t.get('uri') else {}
      if meta:t=dict(t,metadata=meta,**{k:meta.get(k) for k in ('twitter','website') if meta.get(k)})
      old=self.c.execute('SELECT 1 FROM pumpfun_tokens WHERE mint=?',(t['mint'],)).fetchone()
-     record_launch(self.c,chain='solana',launchpad='pumpfun',address=t['mint'],creator=t['creator'],name=t['name'],symbol=t['symbol'],source_tx=item['signature'],source_height=item.get('slot',0),launched_at=now,source_table='pumpfun_tokens',metadata=t,now=now)
+     event_key=record_launch(self.c,chain='solana',launchpad='pumpfun',address=t['mint'],creator=t['creator'],name=t['name'],symbol=t['symbol'],source_tx=item['signature'],source_height=item.get('slot',0),launched_at=now,source_table='pumpfun_tokens',metadata=t,now=now)
+     if os.environ.get('TRENCHNET_V2_ENABLED','false').lower()=='true':
+      with self.c:self.c.execute("UPDATE unified_launches SET pipeline_state='v2_tracking' WHERE event_key=?",(event_key,))
      with self.c:
       self.c.execute('INSERT OR IGNORE INTO pumpfun_tokens VALUES(?,?,?,?,?,?,?,?,?)',(t['mint'],t['name'],t['symbol'],t['creator'],t['uri'],item['signature'],item.get('slot',0),now,json.dumps(t)))
       if old is None:

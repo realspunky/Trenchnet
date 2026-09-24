@@ -105,4 +105,14 @@ def record(c, *, chain, launchpad, address, name='', symbol='', creator='', pair
             website_url=CASE WHEN excluded.website_url<>'' THEN excluded.website_url ELSE unified_launches.website_url END''',
           (event_key,chain,launchpad,address,str(creator or ''),str(name or ''),str(symbol or ''),str(pair_symbol or ''),
            str(source_tx or ''),source_height,launched_at,now,now,bonding_progress,int(bool(migrated)),source_table,payload,social_x_url,website_url))
+    try:
+        from v2_intelligence import enabled as v2_enabled, mark_progress, upsert_intelligence
+        if v2_enabled():
+            mark_progress(c,event_key,address,launchpad,bonding_progress,launched_at,migrated,now)
+            # Source metadata may already contain Stage-2 facts. Extract them immediately;
+            # missing facts remain incomplete and therefore cannot alert.
+            upsert_intelligence(c,event_key,address,launchpad,metadata or {},source=source_table,now=now)
+    except Exception:
+        # Intake must remain durable even if enrichment is temporarily unavailable.
+        pass
     return event_key

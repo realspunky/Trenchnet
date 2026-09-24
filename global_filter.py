@@ -7,6 +7,7 @@ launchpads before queuing Telegram delivery.
 import json, os, sqlite3, time
 from launch_filter import assess
 from scanner import deliver
+from v2_intelligence import gate as v2_gate, render as v2_render, enabled as v2_enabled
 
 
 def setup(c):
@@ -63,7 +64,7 @@ def explorer(chain,address):
     return ''
 
 
-def alert_body(row, decision):
+def alert_body(row, decision, c=None):
     event_key,chain,launchpad,address,creator,name,symbol,pair_symbol,source_height,bonding,migrated,*links=row
     social_x_url=links[0] if len(links)>0 else ''
     website_url=links[1] if len(links)>1 else ''
@@ -95,6 +96,7 @@ def alert_body(row, decision):
     if link: lines.append('🔗 '+link)
     if social_x_url: lines.append('𝕏 X: '+social_x_url)
     if website_url: lines.append('🌐 Website: '+website_url)
+    if c is not None: lines += v2_render(c,event_key)
     lines.append('ℹ️ Contract address is the unique token identity; names/tickers may repeat.')
     return '\n'.join(lines)
 
@@ -126,17 +128,32 @@ def process(c, recipient, now=None, limit=100, duplicate_window=None, creator_wi
     for row in rows:
         event_key,chain,launchpad,address,creator,name,symbol,*_=row
         launched_at=int(row[-2] or 0); metadata=row[-1]; max_age=int(os.environ.get('MAX_LAUNCH_AGE_SECONDS','600'))
-        if not holder_reward_policy(launchpad,metadata):
+        bonding=row[9]; migrated=bool(row[10])
+        v2_ok,v2_reason=v2_gate(c,event_key,bonding,migrated)
+        if not v2_ok:
+            decision={'allow':False,'reason':v2_reason,'duplicates':1,'unique_creators':1,'creator_launches':1}
+        elif not holder_reward_policy(launchpad,metadata):
             decision={'allow':False,'reason':'holder_reward_policy','duplicates':1,'unique_creators':1,'creator_launches':1}
-        elif launched_at and (launched_at < now-max_age or launched_at > now+120):
+        elif launched_at and not v2_enabled() and (launched_at < now-max_age or launched_at > now+120):
             decision={'allow':False,'reason':'stale_launch','duplicates':1,'unique_creators':1,'creator_launches':1}
+        elif v2_enabled():
+            cross=c.execute("SELECT crossed_90_at FROM v2_intelligence WHERE event_key=?",(event_key,)).fetchone()
+            cross_at=int(cross[0] or 0) if cross else 0
+            if not cross_at or cross_at < now-max_age or cross_at > now+120:
+                decision={'allow':False,'reason':'stale_90_crossing','duplicates':1,'unique_creators':1,'creator_launches':1}
+            else:
+                decision=assess(c,chain=chain,launchpad=launchpad,address=address,creator=creator,name=name,symbol=symbol,now=now,duplicate_window=duplicate_window,creator_window=creator_window,creator_limit=creator_limit)
         else:
             decision=assess(c,chain=chain,launchpad=launchpad,address=address,creator=creator,name=name,symbol=symbol,now=now,duplicate_window=duplicate_window,creator_window=creator_window,creator_limit=creator_limit)
         with c:
             c.execute('INSERT OR REPLACE INTO global_filter_decisions (event_key,decided_at,allow,reason,duplicate_count,unique_creators,creator_launches) VALUES(?,?,?,?,?,?,?)',(event_key,now,int(decision['allow']),decision['reason'],decision['duplicates'],decision['unique_creators'],decision['creator_launches']))
             if decision['allow']: allowed+=1
             else: blocked+=1
-            c.execute("UPDATE unified_launches SET pipeline_state=? WHERE event_key=?",('approved' if decision['allow'] else 'filtered',event_key))
+            if decision['reason'] in {'bonding_below_90','intelligence_incomplete'}:
+                pipeline_state='v2_tracking' if decision['reason']=='bonding_below_90' else 'awaiting_intelligence'
+            else:
+                pipeline_state='approved' if decision['allow'] else 'filtered'
+            c.execute("UPDATE unified_launches SET pipeline_state=? WHERE event_key=?",(pipeline_state,event_key))
     remaining=c.execute("SELECT COUNT(*) FROM unified_launches WHERE pipeline_state='intake'").fetchone()[0]
     # Include this cycle's decision reasons and launchpads in health. This makes a
     # zero-approved cycle diagnosable from /status instead of requiring Railway logs.

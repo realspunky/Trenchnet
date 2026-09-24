@@ -110,9 +110,11 @@ class Scanner:
                 block=self.w3.eth.get_block(log['blockNumber'])
                 t=dict(address=address,creator=creator,pool=pool,name=name,symbol=symbol,
                        factory=factory.lower(),tx=log['transactionHash'].hex(),height=log['blockNumber'],created=block['timestamp'])
-                record_launch(self.c,chain='robinhood',launchpad='pons',address=address,creator=creator,
+                event_key=record_launch(self.c,chain='robinhood',launchpad='pons',address=address,creator=creator,
                     name=name,symbol=symbol,source_tx=t['tx'],source_height=t['height'],launched_at=t['created'],
                     source_table='pons_tokens',metadata=t,now=block['timestamp'])
+                if os.environ.get('TRENCHNET_V2_ENABLED','false').lower()=='true':
+                    with self.c:self.c.execute("UPDATE unified_launches SET pipeline_state='v2_tracking' WHERE event_key=?",(event_key,))
                 decision={'creator_launches':1}
                 with self.c:
                     self.c.execute('''INSERT OR IGNORE INTO pons_tokens(address,creator,name,symbol,pool,factory,tx,height,created,status,snapshot)

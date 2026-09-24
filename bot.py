@@ -90,6 +90,19 @@ def reply(c, user_id, text):
             else:
                 monitoring += '\nPrivate scanner has not reported yet'
             try:
+                v2h=c.execute('SELECT updated,message FROM v2_health WHERE id=1').fetchone()
+            except sqlite3.OperationalError:
+                v2h=None
+            if v2h:
+                age=max(0,int(time.time())-v2h[0])
+                monitoring += f'\nV2: {v2h[1]}\nV2 update: {age}s ago'
+                try:
+                    vs=c.execute('SELECT state,COUNT(*) FROM v2_intelligence GROUP BY state').fetchall()
+                    monitoring += '\nV2 intelligence: '+(', '.join(f'{k}={v}' for k,v in vs) or 'none yet')
+                except sqlite3.OperationalError: pass
+            elif os.environ.get('TRENCHNET_V2_ENABLED','false')=='true':
+                monitoring += '\nV2 tracker has not reported yet'
+            try:
                 gf=c.execute('SELECT checked,message FROM global_filter_health WHERE id=1').fetchone()
             except sqlite3.OperationalError:
                 gf=None

@@ -7,4 +7,4 @@ def test_low_latency_defaults():
     assert "created>=?" in TEXT
 def test_metadata_gate_preserved():
     assert "Token metadata name unavailable" in TEXT
-    assert "if s['eligible']:" in TEXT
+    assert "TRENCHNET_V2_ENABLED" in TEXT and "s[\'progress\']>=90" in TEXT

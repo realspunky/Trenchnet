@@ -2,6 +2,7 @@
 import os,time
 from alert_preferences import setup as pref_setup, ensure_user, get
 from global_filter import alert_body
+from v2_intelligence import enabled as v2_enabled, gate as v2_gate
 from scanner import deliver
 
 def setup(c):
@@ -37,9 +38,10 @@ def recipients(c):
 def process(c,now=None,limit=100):
     setup(c); now=int(time.time() if now is None else now)
     max_age=int(os.environ.get('MAX_LAUNCH_AGE_SECONDS','600'))
-    with c:
-        c.execute("""UPDATE global_outbox SET state='stale' WHERE state='pending' AND event_key IN
-          (SELECT event_key FROM unified_launches WHERE launched_at>0 AND launched_at<?)""",(now-max_age,))
+    if not v2_enabled():
+        with c:
+            c.execute("""UPDATE global_outbox SET state='stale' WHERE state='pending' AND event_key IN
+              (SELECT event_key FROM unified_launches WHERE launched_at>0 AND launched_at<?)""",(now-max_age,))
     rows=c.execute('''SELECT u.event_key,u.chain,u.launchpad,u.address,u.creator,u.name,u.symbol,u.pair_symbol,
       u.source_height,u.bonding_progress,u.migrated,u.social_x_url,u.website_url,d.duplicate_count,d.unique_creators,d.creator_launches,u.launched_at,u.metadata
       FROM unified_launches u JOIN global_filter_decisions d ON d.event_key=u.event_key
@@ -50,7 +52,11 @@ def process(c,now=None,limit=100):
         row=x[:13]+(x[17],); decision={'duplicates':x[13],'unique_creators':x[14],'creator_launches':x[15]}
         launched_at=int(x[16] or 0)
         max_age=int(os.environ.get('MAX_LAUNCH_AGE_SECONDS','600'))
-        if launched_at and (launched_at < now-max_age or launched_at > now+120):
+        freshness_at=launched_at
+        if v2_enabled():
+            cr=c.execute("SELECT crossed_90_at FROM v2_intelligence WHERE event_key=?",(x[0],)).fetchone()
+            freshness_at=int(cr[0] or 0) if cr else 0
+        if not freshness_at or (freshness_at < now-max_age or freshness_at > now+120):
             with c:
                 c.execute("UPDATE unified_launches SET pipeline_state='stale' WHERE event_key=?",(x[0],))
                 c.execute('INSERT OR IGNORE INTO alert_route_state VALUES(?,?)',(x[0],now))
@@ -63,7 +69,7 @@ def process(c,now=None,limit=100):
         token_symbol=(row[6] or '').strip()
         if pad=='stonk' and (not token_name or token_name.casefold() in {'unknown','unknown token'} or not token_symbol):
             continue
-        body=alert_body(row,decision)
+        body=alert_body(row,decision,c)
         with c:
             for uid in recipients(c):
                 ensure_user(c,uid)
@@ -86,11 +92,22 @@ def enforce_preferences(c):
         c.execute("""UPDATE global_outbox SET state='metadata_blocked' WHERE state='pending' AND event_key IN
           (SELECT event_key FROM unified_launches WHERE launchpad='stonk' AND
            (name IS NULL OR TRIM(name)='' OR LOWER(TRIM(name)) IN ('unknown','unknown token') OR symbol IS NULL OR TRIM(symbol)=''))""")
-    rows=c.execute("""SELECT o.id,o.recipient,u.launchpad
+    rows=c.execute("""SELECT o.id,o.recipient,u.launchpad,u.event_key,u.bonding_progress,u.migrated,u.metadata
       FROM global_outbox o JOIN unified_launches u ON u.event_key=o.event_key
       WHERE o.state='pending'""").fetchall()
     cancelled=0
-    for ident,uid,pad in rows:
+    for ident,uid,pad,event_key,bonding,migrated,metadata in rows:
+        # Last line of defence: a queued row cannot bypass the mandatory V2 gate
+        # after a restart, stale queue, or upstream bug. Re-check immediately before send.
+        if v2_enabled():
+            ok,_=v2_gate(c,event_key,bonding,bool(migrated))
+            if ok:
+                from global_filter import holder_reward_policy
+                ok=holder_reward_policy(pad,metadata)
+            if not ok:
+                with c:c.execute("UPDATE global_outbox SET state='v2_blocked' WHERE id=? AND state='pending'",(ident,))
+                cancelled+=1
+                continue
         ensure_user(c,uid)
         if not get(c,uid).get(pad,False):
             with c:c.execute("UPDATE global_outbox SET state='preference_blocked' WHERE id=? AND state='pending'",(ident,))

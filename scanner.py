@@ -138,7 +138,7 @@ class Scanner:
                 elif s['verified']:status='tracking'
                 else:status='excluded'
                 with self.c:
-                    if s.get('verified') and s.get('status')==1:
+                    if s.get('verified') and s.get('status')==1 and (os.environ.get('TRENCHNET_V2_ENABLED','false')!='true' or (isinstance(s.get('bonding_percent'),(int,float)) and s.get('bonding_percent')>=90)):
                         meta=dict(t); meta.update(s)
                         record_launch(self.c,chain='bnb',launchpad='flap',address=t['address'],creator=t.get('creator',''),
                             name=t['name'],symbol=t['symbol'],source_tx=t['tx'],source_height=s.get('block_number',t['height']),

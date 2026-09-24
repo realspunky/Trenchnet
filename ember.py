@@ -100,22 +100,13 @@ class Scanner:
             try: markets.append(normalize(x))
             except Exception: bad+=1
         initialized=self.c.execute("SELECT value FROM ember_state WHERE key='initialized'").fetchone()
-        # If this database already contains Ember tokens but the initialization flag
-        # is missing (for example after upgrading from an older build), treat the
-        # existing snapshot as initialized. Otherwise the first post-upgrade poll can
-        # silently absorb genuinely new rows without handing them to the unified filter.
-        if not initialized and self.c.execute('SELECT 1 FROM ember_tokens LIMIT 1').fetchone():
-            with self.c:self.c.execute("INSERT OR REPLACE INTO ember_state VALUES('initialized','1')")
-            initialized=('1',)
         new=0
         with self.c:
             for t in markets:
                 old=self.c.execute('SELECT graduated FROM ember_tokens WHERE mint=?',(t['mint'],)).fetchone()
-                if initialized and old is None:
-                    record_launch(self.c,chain='solana',launchpad='embercurve',address=t['mint'],creator=t['creator'],
-                      name=t['name'],symbol=t['symbol'],pair_symbol=t['pair_symbol'],launched_at=now,bonding_progress=t['progress'],
-                      migrated=t['graduated'],source_table='ember_tokens',metadata=t,now=now)
-                elif old is not None and self.c.execute("SELECT 1 FROM unified_launches WHERE launchpad='embercurve' AND address=?",(t['mint'],)).fetchone():
+                existing_unified=self.c.execute("SELECT 1 FROM unified_launches WHERE launchpad='embercurve' AND address=?",(t['mint'],)).fetchone()
+                v2_crossed=(os.environ.get('TRENCHNET_V2_ENABLED','false')!='true' or (isinstance(t.get('progress'),(int,float)) and t['progress']>=90) or t['graduated'])
+                if initialized and v2_crossed:
                     record_launch(self.c,chain='solana',launchpad='embercurve',address=t['mint'],creator=t['creator'],
                       name=t['name'],symbol=t['symbol'],pair_symbol=t['pair_symbol'],launched_at=now,bonding_progress=t['progress'],
                       migrated=t['graduated'],source_table='ember_tokens',metadata=t,now=now)
@@ -127,22 +118,7 @@ class Scanner:
                     self.c.execute('INSERT OR IGNORE INTO ember_outbox(recipient,event_key,body,expires) VALUES(?,?,?,?)',
                       (self.recipient,'solana:'+t['mint']+':ember:launch',body(t),now+600));new+=1
             self.c.execute("INSERT OR REPLACE INTO ember_state VALUES('initialized','1')")
-            # Recover only fresh Ember rows that may have been absorbed by a prior
-            # initialization/restart bug. The age gate prevents historical floods.
-            max_age=int(os.environ.get('MAX_LAUNCH_AGE_SECONDS','600'))
-            cutoff=now-max_age
-            missed=self.c.execute("""SELECT mint,name,symbol,creator,pair_symbol,progress,graduated,snapshot,first_seen
-              FROM ember_tokens e WHERE e.first_seen>=? AND NOT EXISTS
-              (SELECT 1 FROM unified_launches u WHERE u.launchpad='embercurve' AND u.address=e.mint)""",(cutoff,)).fetchall()
-            recovered=0
-            for mint,name,symbol,creator,pair_symbol,progress,graduated,snapshot,first_seen in missed:
-                try: meta=json.loads(snapshot or '{}')
-                except Exception: meta={}
-                record_launch(self.c,chain='solana',launchpad='embercurve',address=mint,creator=creator,
-                  name=name,symbol=symbol,pair_symbol=pair_symbol,launched_at=first_seen,bonding_progress=progress,
-                  migrated=bool(graduated),source_table='ember_tokens',metadata=meta,now=now)
-                recovered+=1
-        self.health(f'EmberCurve: {len(raw_rows)} API rows; {len(markets)} valid; {bad} malformed; {new} new launches detected; {recovered} fresh launches recovered')
+        self.health(f'EmberCurve: {len(raw_rows)} API rows; {len(markets)} valid; {bad} malformed; {new} new launches detected')
 
 def run():
     if os.environ.get('EMBER_ENABLED')!='true':return
